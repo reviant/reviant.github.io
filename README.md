@@ -1,1 +1,619 @@
-# reviant.github.io
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Causlist Maker</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    
+    <!-- PapaParse -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
+    <!-- SheetJS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        .drag-active { border-color: #3b82f6 !important; background-color: #eff6ff !important; }
+        .loader {
+            border: 4px solid #f3f3f3; border-top: 4px solid #3b82f6; border-radius: 50%;
+            width: 24px; height: 24px; animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #debug-log { font-family: monospace; font-size: 11px; white-space: pre-wrap; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen font-sans">
+
+    <nav class="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i></div>
+                <h1 class="text-xl font-bold text-slate-800">Causelist Maker</h1>
+            </div>
+            <div class="text-xs text-gray-500 hidden sm:block">Runs in Browser • No Server Upload</div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- Hosting Tip -->
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-8 text-sm text-blue-800">
+            <strong>Tip:</strong> To use this tool anywhere, upload this HTML file to <a href="https://pages.github.com/" target="_blank" class="underline">GitHub Pages</a> or <a href="https://www.netlify.com/" target="_blank" class="underline">Netlify Drop</a>. You will get a public link (URL) to access it from any computer or phone.
+        </div>
+
+        <!-- Upload Section -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <!-- CSV Upload -->
+            <div class="flex flex-col">
+                <label class="block text-sm font-medium text-slate-700 mb-2">1. Case List (CSV/XLSX)</label>
+                <div id="drop-zone-csv" class="flex-1 relative border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer group bg-white">
+                    <i class="fa-solid fa-file-excel text-4xl text-slate-400 mb-3 block group-hover:text-green-500 transition-colors"></i>
+                    <p id="csv-filename" class="text-sm text-slate-600 mb-4">Click here to upload Case List</p>
+                    <input type="file" id="csv-input" accept=".csv, .xlsx, .xls" class="hidden">
+                </div>
+                <div class="mt-3 flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
+                    <div class="flex items-center">
+                        <input type="checkbox" id="has-headers" checked class="w-4 h-4 text-blue-600 rounded">
+                        <label for="has-headers" class="ml-2 text-sm text-gray-700">File has Header Row</label>
+                    </div>
+                    <div id="csv-status" class="text-xs font-medium text-green-600 hidden flex items-center gap-2"><i class="fa-solid fa-check-circle"></i> <span id="csv-count">0</span> loaded</div>
+                </div>
+            </div>
+
+            <!-- PDF Upload -->
+            <div class="flex flex-col">
+                <label class="block text-sm font-medium text-slate-700 mb-2">2. Cause List (PDF)</label>
+                <div id="drop-zone-pdf" class="flex-1 relative border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer group bg-white">
+                    <i class="fa-solid fa-file-pdf text-4xl text-slate-400 mb-3 block group-hover:text-red-500 transition-colors"></i>
+                    <p id="pdf-filename" class="text-sm text-slate-600 mb-4">Click here to upload PDF</p>
+                    <input type="file" id="pdf-input" accept=".pdf" class="hidden">
+                </div>
+                <div class="mt-3 p-3 bg-white rounded-lg border border-slate-200 shadow-sm min-h-[50px] flex items-center">
+                    <div id="pdf-status" class="text-xs font-medium text-blue-600 hidden flex items-center gap-2"><i class="fa-solid fa-check-circle"></i> PDF Ready</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Process Button -->
+        <div class="flex justify-center mb-8">
+            <button id="process-btn" onclick="startProcessing()" disabled class="bg-slate-300 text-slate-500 cursor-not-allowed px-8 py-3 rounded-xl font-semibold shadow-sm transition-all flex items-center gap-2 text-lg w-full sm:w-auto justify-center">
+                <span id="btn-icon"><i class="fa-solid fa-bolt"></i></span><span id="btn-text">Match Cases</span>
+            </button>
+        </div>
+
+        <!-- Results & Logs -->
+        <div id="progress-container" class="hidden max-w-2xl mx-auto mb-8">
+            <div class="flex justify-between text-xs text-slate-500 mb-1"><span id="progress-text">Initializing...</span><span id="progress-percent">0%</span></div>
+            <div class="w-full bg-slate-200 rounded-full h-2.5"><div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div></div>
+        </div>
+
+        <div id="results-section" class="hidden">
+            <div class="flex flex-col sm:flex-row justify-between items-end sm:items-center mb-4 gap-4">
+                <div><h3 class="text-xl font-bold text-slate-800">Results</h3><p class="text-sm text-slate-500">Found <span id="match-count" class="font-bold text-blue-600">0</span> exact matches out of <span id="total-count">0</span> cases.</p></div>
+                <button onclick="exportExcel()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm flex items-center gap-2"><i class="fa-solid fa-file-excel"></i> Download Excel</button>
+            </div>
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden overflow-x-auto mb-8">
+                <table class="w-full text-sm text-left">
+                    <thead class="bg-slate-50 border-b border-slate-200 text-xs uppercase text-slate-500">
+                        <tr>
+                            <th class="px-4 py-3">Item No</th>
+                            <th class="px-4 py-3 bg-purple-50">Court No</th>
+                            <th class="px-4 py-3 bg-blue-50">Bench No</th>
+                            <th class="px-4 py-3">Justices</th>
+                            <th class="px-4 py-3">Case Type & No</th>
+                            <th class="px-4 py-3">Case Title</th>
+                            <th class="px-4 py-3">PDF Match</th>
+                            <th class="px-4 py-3">PDF Title</th>
+                            <th class="px-4 py-3 bg-yellow-50">Date</th>
+                            <th class="px-4 py-3 text-right">Match</th>
+                        </tr>
+                    </thead>
+                    <tbody id="results-body" class="divide-y divide-slate-200"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Debug Log Area -->
+        <div class="max-w-7xl mx-auto">
+            <button onclick="document.getElementById('debug-container').classList.toggle('hidden')" class="text-xs text-slate-500 underline mb-2">Toggle Debug Log</button>
+            <div id="debug-container" class="hidden bg-slate-900 text-green-400 p-4 rounded-lg shadow-inner h-64 overflow-y-auto">
+                <div id="debug-log">System Ready...</div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // --- Init ---
+        window.onload = function() {
+            if (typeof pdfjsLib !== 'undefined') {
+                pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            } else {
+                console.error("PDF.js library not loaded.");
+                document.getElementById('debug-log').innerText = "Error: PDF.js library failed to load. Check internet connection.";
+            }
+        };
+
+        let csvData = [], pdfFile = null, processedResults = [];
+
+        function log(msg) { const div = document.getElementById('debug-log'); div.innerText += "\n" + msg; div.scrollTop = div.scrollHeight; }
+
+        document.getElementById('drop-zone-csv').addEventListener('click', () => document.getElementById('csv-input').click());
+        document.getElementById('drop-zone-pdf').addEventListener('click', () => document.getElementById('pdf-input').click());
+        document.getElementById('has-headers').addEventListener('change', () => { if(document.getElementById('csv-input').files[0]) parseFile(document.getElementById('csv-input').files[0]); });
+
+        document.getElementById('csv-input').addEventListener('change', function() { if(this.files[0]) parseFile(this.files[0]); });
+        document.getElementById('pdf-input').addEventListener('change', function() {
+            if(this.files[0]) {
+                pdfFile = this.files[0];
+                document.getElementById('pdf-filename').textContent = pdfFile.name;
+                document.getElementById('pdf-status').classList.remove('hidden');
+                checkReady();
+            }
+        });
+
+        function parseFile(file) {
+            const hasHeaders = document.getElementById('has-headers').checked;
+            document.getElementById('csv-filename').textContent = file.name;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = e.target.result;
+                    let rows = [];
+                    if (file.name.match(/\.xls.?$/)) {
+                        const workbook = XLSX.read(data, { type: 'binary' });
+                        const sheetName = workbook.SheetNames[0];
+                        const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
+                        if(hasHeaders) {
+                            const headers = rawRows[0];
+                            rows = rawRows.slice(1).map(r => { let o={}; r.forEach((c,i) => {if(headers[i]) o[headers[i]]=c;}); return o; });
+                        } else { rows = rawRows.map(r => Object.assign({}, r)); }
+                    } else {
+                        const res = Papa.parse(data, { header: hasHeaders, skipEmptyLines: true });
+                        rows = res.data;
+                    }
+                    csvData = rows.map(row => {
+                        const newRow = { _original: row };
+                        Object.keys(row).forEach(key => newRow[key.trim().toLowerCase().replace(/\s+/g, '')] = row[key]);
+                        return newRow;
+                    });
+                    document.getElementById('csv-count').textContent = csvData.length;
+                    document.getElementById('csv-status').classList.remove('hidden');
+                    checkReady();
+                } catch(err) { alert("Error: " + err.message); }
+            };
+            if(file.name.match(/\.xls.?$/)) reader.readAsBinaryString(file); else reader.readAsText(file);
+        }
+
+        function checkReady() {
+            if (csvData.length > 0 && pdfFile) {
+                document.getElementById('process-btn').disabled = false;
+                document.getElementById('process-btn').classList.remove('bg-slate-300', 'text-slate-500', 'cursor-not-allowed');
+                document.getElementById('process-btn').classList.add('bg-blue-600', 'hover:bg-blue-700', 'text-white');
+            }
+        }
+
+        function normalizeCaseString(text) { return String(text || "").replace(/[^a-zA-Z0-9]/g, '').toUpperCase(); }
+
+        // --- Helper: Normalize Bench IDs ---
+        function getBenchVariants(type, num) {
+            const variants = [`${type}-${num}`];
+            const map = {
+                '1': 'I', '2': 'II', '3': 'III', '4': 'IV', '5': 'V', '6': 'VI',
+                'I': '1', 'II': '2', 'III': '3', 'IV': '4', 'V': '5', 'VI': '6',
+                '11': 'II', 'II': '11'
+            };
+            if (map[num]) variants.push(`${type}-${map[num]}`);
+            return variants;
+        }
+
+        // --- V28: VISUAL ROW RECONSTRUCTION FOR INDEX ---
+        function buildVisualBenchMap(items) {
+            const map = {};
+            
+            // 1. Pre-populate with known defaults from your snippet (Fail-safe)
+            map["DB-I"] = "1"; map["DB-1"] = "1";
+            map["SB-I"] = "1"; map["SB-1"] = "1";
+            map["DB-II"] = "3"; map["DB-11"] = "3";
+            map["SB-II"] = "4"; map["SB-11"] = "4";
+            map["SB-III"] = "7";
+            map["SB-IV"] = "9";
+            map["SB-V"] = "10";
+            
+            // 2. Visual Clustering by Y coordinate
+            const rows = {};
+            const tolerance = 10; // Pixels
+
+            items.forEach(item => {
+                let foundY = null;
+                for (const y in rows) {
+                    if (Math.abs(y - item.transform[5]) < tolerance) {
+                        foundY = y;
+                        break;
+                    }
+                }
+                if (!foundY) foundY = item.transform[5];
+                
+                if (!rows[foundY]) rows[foundY] = [];
+                rows[foundY].push(item);
+            });
+
+            // Sort rows top to bottom (descending Y)
+            const sortedY = Object.keys(rows).sort((a, b) => b - a);
+            
+            // Reconstruct lines
+            const textLines = sortedY.map(y => {
+                // Sort items left to right
+                const rowItems = rows[y].sort((a, b) => a.transform[4] - b.transform[4]);
+                return rowItems.map(i => i.str).join(" ");
+            });
+
+            // 3. Parse Reconstructed Lines
+            let lastBench = null;
+            
+            textLines.forEach(line => {
+                const cleanLine = line.toUpperCase().replace(/[\(\)]/g, "");
+                const tokens = cleanLine.split(/\s+/);
+
+                for(let i=0; i<tokens.length; i++) {
+                    const t = tokens[i];
+
+                    // Detect Bench ID (DB-1, SB-V, etc)
+                    if (t.match(/^(DB|SB)-?([IVX0-9]+)$/)) {
+                        let type = RegExp.$1;
+                        let num = RegExp.$2;
+                        if(num==='11') num='II'; if(num==='1') num='I';
+                        lastBench = `${type}-${num}`;
+                    }
+
+                    // Detect Court Number
+                    if (t === "COURT" && lastBench) {
+                        // Look ahead for number
+                        if (tokens[i+1] && tokens[i+1].match(/^NO\.?$/)) {
+                             // Format: Court No 10
+                             const nextVal = tokens[i+2];
+                             if (nextVal && nextVal.match(/^\d+$/)) {
+                                 map[lastBench] = nextVal;
+                                 // Add variants
+                                 const parts = lastBench.split("-");
+                                 const v = getBenchVariants(parts[0], parts[1]);
+                                 v.forEach(k => map[k] = nextVal);
+                                 log(`Visual Index: ${lastBench} -> Court ${nextVal}`);
+                                 lastBench = null; // Consumed
+                             }
+                        } else {
+                            // Format: Court 10
+                            const nextVal = tokens[i+1];
+                            if (nextVal && nextVal.match(/^\d+$/)) {
+                                map[lastBench] = nextVal;
+                                const parts = lastBench.split("-");
+                                const v = getBenchVariants(parts[0], parts[1]);
+                                v.forEach(k => map[k] = nextVal);
+                                log(`Visual Index: ${lastBench} -> Court ${nextVal}`);
+                                lastBench = null;
+                            }
+                        }
+                    }
+                }
+            });
+            
+            return map;
+        }
+
+        async function startProcessing() {
+            const btn = document.getElementById('process-btn');
+            const progressBar = document.getElementById('progress-bar');
+            const statusText = document.getElementById('progress-text');
+
+            btn.disabled = true;
+            // btn.innerHTML = '<div class="loader"></div> Processing...';
+            statusText.textContent = "Processing...";
+            document.getElementById('progress-container').classList.remove('hidden');
+            document.getElementById('results-section').classList.add('hidden');
+            log("Starting Analysis V35...");
+
+            try {
+                const arrayBuffer = await pdfFile.arrayBuffer();
+                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                const allPages = [];
+                let causeListDate = "-";
+
+                // 0. INDEX PARSING (Visual Strategy)
+                log("Parsing Index on Page 1...");
+                const page1 = await pdf.getPage(1);
+                const text1 = await page1.getTextContent();
+                
+                // Date Scan
+                const rawBlob = text1.items.map(i => i.str).join(" ");
+                const dateMatch = rawBlob.match(/(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})/);
+                if(dateMatch) causeListDate = `${dateMatch[1]}/${dateMatch[2]}/${dateMatch[3]}`;
+
+                // Build Map
+                const benchCourtMap = buildVisualBenchMap(text1.items);
+
+                // 1. Extraction Phase
+                let currentActiveItemNo = "-";
+                let currentCaseObj = null;
+                let currentActiveDate = causeListDate; 
+
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    statusText.textContent = `Scanning Page ${i}/${pdf.numPages}...`;
+                    progressBar.style.width = `${Math.round((i/pdf.numPages)*60)}%`;
+
+                    const page = await pdf.getPage(i);
+                    const textContent = await page.getTextContent();
+                    // Use V5 Line Reconstruction for Body (Proven reliable)
+                    const lines = reconstructLinesV5(textContent.items);
+                    
+                    let pageObj = {
+                        pageNum: i,
+                        benchStart: null,
+                        headerCourt: null,
+                        justices: [],
+                        cases: [],
+                        pageDate: null
+                    };
+
+                    // Header Scanning
+                    const headerItems = textContent.items.filter(item => item.transform[5] > 600);
+                    let headerString = headerItems.map(i => i.str.toUpperCase()).join(" ");
+                    
+                    // Date Update
+                    const pDateMatch = headerString.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+                    if (pDateMatch) {
+                        const d = pDateMatch[1].padStart(2,'0');
+                        const m = pDateMatch[2].padStart(2,'0');
+                        const y = pDateMatch[3];
+                        currentActiveDate = `${d}/${m}/${y}`;
+                    }
+
+                    // Fallback Header Court
+                    const fallbackMatch = headerString.match(/COURT\s*(?:NO\.?)?\s*(\d+)/);
+                    if (fallbackMatch && !headerString.includes("HIGH") && !headerString.includes("SUPREME")) {
+                        pageObj.headerCourt = fallbackMatch[1];
+                    }
+
+                    // Line Scanning
+                    for (let j = 0; j < lines.length; j++) {
+                        const line = lines[j];
+                        const upper = line.toUpperCase();
+
+                        if (upper.includes("BENCH NO")) {
+                            currentCaseObj = null;
+                            const m = line.match(/BENCH\s*NO[.:\s]*([A-Z0-9-]+)/i);
+                            if(m) { 
+                                let bId = m[1].trim().toUpperCase();
+                                // Fix body OCR errors
+                                if (bId.endsWith("-11")) bId = bId.replace("-11", "-II");
+                                if (bId.endsWith("-1")) bId = bId.replace("-1", "-I");
+                                pageObj.benchStart = bId;
+                                currentActiveItemNo = "-"; 
+                            }
+                            continue; 
+                        }
+                        if (upper.includes("HON'BLE")) { currentCaseObj = null; pageObj.justices.push(line.trim()); continue; }
+
+                        // Explicit Case
+                        const explicitMatch = line.match(/^(\d+)\s+([A-Za-z\.\(\)\s\-\&]+\d+\/\d+)\s*(.*)/i);
+                        if (explicitMatch) {
+                            currentActiveItemNo = explicitMatch[1];
+                            currentCaseObj = {
+                                itemNo: currentActiveItemNo,
+                                pdfCaseNo: explicitMatch[2].trim(),
+                                cleanId: normalizeCaseString(explicitMatch[2]),
+                                pdfTitle: explicitMatch[3].trim()
+                            };
+                            pageObj.cases.push(currentCaseObj);
+                            continue;
+                        }
+
+                        // Implicit Case
+                        const cleanLine = line.replace(/^c\/w\s*/i, "").trim();
+                        const implicitMatch = cleanLine.match(/^([A-Za-z\.\(\)\s\-\&]+\d+\/\d+)\s*(.*)/i);
+                        if (implicitMatch && currentActiveItemNo !== "-" && (line.toLowerCase().startsWith('c/w') || cleanLine.length > 5)) {
+                             if (cleanLine.match(/[A-Z]/) && cleanLine.match(/\d+\/\d+/)) {
+                                 currentCaseObj = {
+                                    itemNo: currentActiveItemNo,
+                                    pdfCaseNo: implicitMatch[1].trim(),
+                                    cleanId: normalizeCaseString(implicitMatch[1]),
+                                    pdfTitle: implicitMatch[2].trim()
+                                };
+                                pageObj.cases.push(currentCaseObj);
+                                continue;
+                             }
+                        }
+
+                        if (currentCaseObj) {
+                            if (line.match(/^Page No/i) || line.match(/^\d+$/)) continue;
+                            if (currentCaseObj.pdfTitle.length < 500) currentCaseObj.pdfTitle += " " + line.trim();
+                        }
+                    }
+                    
+                    pageObj.assignedDate = currentActiveDate;
+                    allPages.push(pageObj);
+                }
+
+                // 2. Assign Court
+                statusText.textContent = "Mapping Benches...";
+                progressBar.style.width = "80%";
+                
+                const caseMap = {};
+                let currentBench = "-";
+                let currentCourt = "-";
+                let currentJustices = "-";
+
+                allPages.forEach(page => {
+                    if (page.benchStart) {
+                        currentBench = page.benchStart;
+                        currentJustices = page.justices.join(" & ");
+                        
+                        // Try Index Map
+                        const lookupKey = currentBench;
+                        if (benchCourtMap[lookupKey]) {
+                            currentCourt = benchCourtMap[lookupKey];
+                        } else {
+                            // Fallback to Header
+                            if (page.headerCourt) currentCourt = page.headerCourt;
+                            else currentCourt = "-";
+                        }
+                    } else if (!currentCourt || currentCourt === "-") {
+                        if (page.headerCourt) currentCourt = page.headerCourt;
+                    }
+                    
+                    page.cases.forEach(c => {
+                        const cleanTitle = c.pdfTitle.replace(/\s+/g, ' ').trim();
+                        caseMap[c.cleanId] = {
+                            item: c.itemNo,
+                            pdfRef: c.pdfCaseNo,
+                            bench: currentBench,
+                            court: currentCourt,
+                            justices: currentJustices,
+                            pdfTitle: cleanTitle,
+                            date: page.assignedDate
+                        };
+                    });
+                });
+
+                // 3. Match CSV
+                statusText.textContent = "Finalizing...";
+                progressBar.style.width = "100%";
+
+                processedResults = csvData.map(row => {
+                    let cType = row['casetype'] || row['type'] || "";
+                    let cNum = row['casenumber'] || row['no'] || row['number'] || "";
+                    let sheetTitle = row['title'] || row['partyname'] || "";
+
+                    if (!cType && !cNum) {
+                        const vals = Object.values(row._original);
+                        if (vals.length >= 2) { cType = String(vals[0]); cNum = String(vals[1]); }
+                        if (vals.length > 2) sheetTitle = String(vals[2]);
+                    }
+
+                    const searchId = normalizeCaseString(cType + cNum);
+                    const match = caseMap[searchId];
+
+                    return {
+                        csvCaseNo: `${cType} ${cNum}`,
+                        sheetTitle: sheetTitle,
+                        status: match ? "Exact" : "Not Found",
+                        itemNo: match ? match.item : "-",
+                        benchNo: match ? match.bench : "-",
+                        courtNo: match ? match.court : "-",
+                        justices: match ? match.justices : "-",
+                        pdfRef: match ? match.pdfRef : "-",
+                        pdfTitle: match ? match.pdfTitle : "-",
+                        date: match ? match.date : "-"
+                    };
+                });
+
+                // 4. Sort
+                processedResults.sort((a, b) => {
+                    const getNum = (val) => { if (!val || val === "-") return 999999; const num = parseInt(val, 10); return isNaN(num) ? 999999 : num; };
+                    const itemA = getNum(a.itemNo), itemB = getNum(b.itemNo);
+                    if (itemA !== itemB) return itemA - itemB;
+                    const courtA = getNum(a.courtNo), courtB = getNum(b.courtNo);
+                    if (courtA !== courtB) return courtA - courtB;
+                    // Date Sort: Parse dd/mm/yyyy to Date object
+                    const parseDate = (d) => { 
+                        if(!d || d==="-") return new Date(2099,0,1); 
+                        const parts = d.split("/"); 
+                        return new Date(parts[2], parts[1]-1, parts[0]); 
+                    }
+                    return parseDate(a.date) - parseDate(b.date);
+                });
+
+                renderResults();
+
+            } catch (error) {
+                console.error(error);
+                alert("Error: " + error.message);
+            } finally {
+                btn.disabled = false;
+                // btn.innerHTML = '<span id="btn-icon"><i class="fa-solid fa-bolt"></i></span> Match Cases';
+            }
+        }
+
+        function reconstructLinesV5(items) {
+            const yTolerance = 5; 
+            const linesMap = {};
+            items.forEach(item => {
+                const y = item.transform[5]; 
+                let foundKey = null;
+                for (const key in linesMap) { if (Math.abs(parseFloat(key) - y) < yTolerance) { foundKey = key; break; } }
+                if (foundKey) linesMap[foundKey].push(item); else linesMap[y] = [item];
+            });
+            return Object.keys(linesMap).sort((a, b) => parseFloat(b) - parseFloat(a)).map(y => {
+                const lineItems = linesMap[y].sort((a, b) => a.transform[4] - b.transform[4]);
+                let str = "", lastX = 0, lastWidth = 0;
+                lineItems.forEach(item => {
+                    if (lastX > 0 && (item.transform[4] - (lastX + lastWidth)) > 5) str += " ";
+                    str += item.str; lastX = item.transform[4]; lastWidth = item.width;
+                });
+                return str.trim();
+            });
+        }
+
+        function renderResults() {
+            const tbody = document.getElementById('results-body');
+            tbody.innerHTML = '';
+            let foundCount = 0;
+            processedResults.forEach(res => {
+                if(res.status === "Exact") foundCount++;
+                const tr = document.createElement('tr');
+                tr.className = "border-b hover:bg-slate-50 text-xs sm:text-sm";
+                const statusClass = res.status === "Exact" ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800";
+                
+                tr.innerHTML = `
+                    <td class="px-4 py-3 font-mono text-slate-700 font-bold">${res.itemNo}</td>
+                    <td class="px-4 py-3 bg-purple-50 text-purple-700 font-bold">${res.courtNo}</td>
+                    <td class="px-4 py-3 bg-blue-50 text-blue-700 font-bold">${res.benchNo}</td>
+                    <td class="px-4 py-3 text-gray-500 text-xs max-w-xs truncate" title="${res.justices}">${res.justices}</td>
+                    <td class="px-4 py-3 font-medium">${res.csvCaseNo}</td>
+                    <td class="px-4 py-3 text-gray-600 max-w-xs truncate" title="${res.sheetTitle}">${res.sheetTitle}</td>
+                    <td class="px-4 py-3 text-gray-600">${res.pdfRef}</td>
+                    <td class="px-4 py-3 text-gray-500 text-xs max-w-xs truncate" title="${res.pdfTitle}">${res.pdfTitle}</td>
+                    <td class="px-4 py-3 font-mono text-slate-500 bg-yellow-50">${res.date}</td>
+                    <td class="px-4 py-3 text-right"><span class="px-2 py-1 rounded font-bold ${statusClass}">${res.status}</span></td>
+                `;
+                tbody.appendChild(tr);
+            });
+            document.getElementById('match-count').textContent = foundCount;
+            document.getElementById('total-count').textContent = processedResults.length;
+            document.getElementById('results-section').classList.remove('hidden');
+            document.getElementById('progress-container').classList.add('hidden');
+        }
+
+        function exportExcel() {
+            const exportData = processedResults.map(row => {
+                const itemNum = parseInt(row.itemNo);
+                const courtNum = parseInt(row.courtNo);
+                
+                return {
+                    "Item No": isNaN(itemNum) ? row.itemNo : itemNum,
+                    "Court No": isNaN(courtNum) ? row.courtNo : courtNum,
+                    "Bench No": row.benchNo,
+                    "Justices": row.justices,
+                    "Case Type & No": row.csvCaseNo,
+                    "Case Title": row.sheetTitle,
+                    "PDF Match": row.pdfRef,
+                    "PDF Title": row.pdfTitle,
+                    "Date": row.date,
+                    "Match Status": row.status
+                };
+            });
+            const wb = XLSX.utils.book_new();
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            XLSX.utils.book_append_sheet(wb, ws, "Matched Cases");
+            XLSX.writeFile(wb, "matched_cases_report.xlsx");
+        }
+    </script>
+</body>
+</html>
