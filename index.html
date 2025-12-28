@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Causelist Maker</title>
+    <title>Legal Case Matcher V38 (Hybrid Fix)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -28,15 +28,37 @@
         }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         #debug-log { font-family: monospace; font-size: 11px; white-space: pre-wrap; }
+        
+        /* Custom Toast Notification */
+        #toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+        }
+        .toast {
+            background-color: #ef4444;
+            color: white;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            margin-bottom: 0.5rem;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            max-width: 300px;
+        }
+        .toast.show { opacity: 1; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen font-sans">
+
+    <div id="toast-container"></div>
 
     <nav class="bg-white shadow-sm border-b border-slate-200 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i></div>
-                <h1 class="text-xl font-bold text-slate-800">Causelist Maker</h1>
+                <h1 class="text-xl font-bold text-slate-800">Case Matcher V38</h1>
             </div>
         </div>
     </nav>
@@ -136,6 +158,26 @@
             }
         };
 
+        // Helper for showing errors
+        function showError(message) {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.innerText = message;
+            container.appendChild(toast);
+            
+            // Trigger reflow
+            void toast.offsetWidth;
+            toast.classList.add('show');
+            
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => toast.remove(), 300);
+            }, 5000);
+            
+            log("ERROR: " + message);
+        }
+
         let csvData = [], pdfFile = null, processedResults = [];
 
         function log(msg) { const div = document.getElementById('debug-log'); div.innerText += "\n" + msg; div.scrollTop = div.scrollHeight; }
@@ -154,6 +196,7 @@
             }
         });
 
+        // MODIFIED: Parse File with Blind Header Stripping
         function parseFile(file) {
             const hasHeaders = document.getElementById('has-headers').checked;
             document.getElementById('csv-filename').textContent = file.name;
@@ -162,27 +205,43 @@
                 try {
                     const data = e.target.result;
                     let rows = [];
+                    
                     if (file.name.match(/\.xls.?$/)) {
+                        // EXCEL parsing
                         const workbook = XLSX.read(data, { type: 'binary' });
                         const sheetName = workbook.SheetNames[0];
+                        // Force header:1 to get raw array of arrays
                         const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
-                        if(hasHeaders) {
-                            const headers = rawRows[0];
-                            rows = rawRows.slice(1).map(r => { let o={}; r.forEach((c,i) => {if(headers[i]) o[headers[i]]=c;}); return o; });
-                        } else { rows = rawRows.map(r => Object.assign({}, r)); }
+                        
+                        // Blind Logic: If hasHeaders, throw away row 1.
+                        if(hasHeaders && rawRows.length > 0) {
+                            rows = rawRows.slice(1);
+                        } else {
+                            rows = rawRows;
+                        }
                     } else {
-                        const res = Papa.parse(data, { header: hasHeaders, skipEmptyLines: true });
-                        rows = res.data;
+                        // CSV parsing
+                        // Force header: false to get array of arrays
+                        const res = Papa.parse(data, { header: false, skipEmptyLines: true });
+                        const rawRows = res.data;
+
+                        // Blind Logic: If hasHeaders, throw away row 1.
+                        if(hasHeaders && rawRows.length > 0) {
+                            rows = rawRows.slice(1);
+                        } else {
+                            rows = rawRows;
+                        }
                     }
+
+                    // Store as object wrapper but keep array data
                     csvData = rows.map(row => {
-                        const newRow = { _original: row };
-                        Object.keys(row).forEach(key => newRow[key.trim().toLowerCase().replace(/[\s\.]+/g, '')] = row[key]);
-                        return newRow;
+                        return { _original: row };
                     });
+
                     document.getElementById('csv-count').textContent = csvData.length;
                     document.getElementById('csv-status').classList.remove('hidden');
                     checkReady();
-                } catch(err) { alert("Error: " + err.message); }
+                } catch(err) { showError("Error parsing file: " + err.message); }
             };
             if(file.name.match(/\.xls.?$/)) reader.readAsBinaryString(file); else reader.readAsText(file);
         }
@@ -280,7 +339,7 @@
             statusText.textContent = "Processing...";
             document.getElementById('progress-container').classList.remove('hidden');
             document.getElementById('results-section').classList.add('hidden');
-            log("Starting Analysis V38 (RJ + Fallbacks)...");
+            log("Starting Analysis V38 (Hybrid Fix)...");
 
             try {
                 const arrayBuffer = await pdfFile.arrayBuffer();
@@ -479,15 +538,35 @@
                 statusText.textContent = "Finalizing...";
                 progressBar.style.width = "100%";
 
+                // MODIFIED: Hybrid Processing Logic
                 processedResults = csvData.map(row => {
-                    let cType = row['casetype'] || row['type'] || "";
-                    let cNum = row['casenumber'] || row['no'] || row['number'] || row['caseno'] || row['caseno.'] || "";
-                    let sheetTitle = row['title'] || row['partyname'] || row['titleofthecase'] || "";
+                    let cType = "", cNum = "", sheetTitle = "";
+                    
+                    // We forced array structure in parseFile. row._original is an array.
+                    // But safeguard in case user uploaded weird file or _original is obj
+                    const vals = Array.isArray(row._original) ? row._original : Object.values(row._original);
+                    
+                    const v0 = vals[0] ? String(vals[0]).trim() : "";
+                    const v1 = vals[1] ? String(vals[1]).trim() : "";
+                    const v2 = vals[2] ? String(vals[2]).trim() : "";
+                    const v3 = vals[3] ? String(vals[3]).trim() : "";
 
-                    if (!cType && !cNum) {
-                        const vals = Object.values(row._original);
-                        if (vals.length >= 2) { cType = String(vals[0]); cNum = String(vals[1]); }
-                        if (vals.length > 2) sheetTitle = String(vals[2]);
+                    // SMART DETECT: Is Col 0 a Serial Number?
+                    // Heuristic: v0 is just digits (max 5 chars) AND v1 contains letters (likely case type)
+                    // This handles "1, WP(C), 123" structure
+                    const isSerialValue = /^\d{1,5}$/.test(v0);
+                    const isTypeCol1 = /[a-zA-Z]/.test(v1); // Case type usually has letters
+
+                    if (isSerialValue && isTypeCol1) {
+                        // Shift Right (Skip Col 0)
+                        cType = v1;
+                        cNum = v2;
+                        sheetTitle = v3;
+                    } else {
+                        // Standard Position (Col 0 is Case Type)
+                        cType = v0;
+                        cNum = v1;
+                        sheetTitle = v2;
                     }
 
                     const searchId = normalizeCaseString(cType + cNum);
@@ -524,7 +603,7 @@
 
             } catch (error) {
                 console.error(error);
-                alert("Error: " + error.message);
+                showError("Processing Error: " + error.message);
             } finally {
                 btn.disabled = false;
             }
@@ -604,6 +683,4 @@
         }
     </script>
 </body>
-
 </html>
-
