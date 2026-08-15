@@ -14,8 +14,8 @@
     <!-- PapaParse -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
-    <!-- SheetJS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- SheetJS (Swapped to xlsx-js-style for cell formatting support) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 
     <!-- Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -122,8 +122,8 @@
                         <tr>
                             <th class="px-4 py-3">Item No</th>
                             <th class="px-4 py-3 bg-purple-50">Court No</th>
-                            <th class="px-4 py-3 bg-blue-50">Bench No</th>
                             <th class="px-4 py-3">Justices</th>
+                            <th class="px-4 py-3 bg-blue-50">Bench No</th>
                             <th class="px-4 py-3">Case Type & No</th>
                             <th class="px-4 py-3">Case Title</th>
                             <th class="px-4 py-3">PDF Match</th>
@@ -196,7 +196,7 @@
             }
         });
 
-        // MODIFIED: Parse File with Blind Header Stripping
+        // Parse File with Blind Header Stripping
         function parseFile(file) {
             const hasHeaders = document.getElementById('has-headers').checked;
             document.getElementById('csv-filename').textContent = file.name;
@@ -207,25 +207,19 @@
                     let rows = [];
                     
                     if (file.name.match(/\.xls.?$/)) {
-                        // EXCEL parsing
                         const workbook = XLSX.read(data, { type: 'binary' });
                         const sheetName = workbook.SheetNames[0];
-                        // Force header:1 to get raw array of arrays
                         const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
                         
-                        // Blind Logic: If hasHeaders, throw away row 1.
                         if(hasHeaders && rawRows.length > 0) {
                             rows = rawRows.slice(1);
                         } else {
                             rows = rawRows;
                         }
                     } else {
-                        // CSV parsing
-                        // Force header: false to get array of arrays
                         const res = Papa.parse(data, { header: false, skipEmptyLines: true });
                         const rawRows = res.data;
 
-                        // Blind Logic: If hasHeaders, throw away row 1.
                         if(hasHeaders && rawRows.length > 0) {
                             rows = rawRows.slice(1);
                         } else {
@@ -233,7 +227,6 @@
                         }
                     }
 
-                    // Store as object wrapper but keep array data
                     csvData = rows.map(row => {
                         return { _original: row };
                     });
@@ -264,69 +257,115 @@
             return variants;
         }
 
-        // --- Helper: Shorten Justice Names ---
-        function shortenJusticeName(fullName) {
-            if (!fullName) return "-";
-            const uName = fullName.toUpperCase();
+        // --- Helper: Dynamic Name Shortener ---
+        function shortenJusticeName(fullName, benchNo) {
+            if (!fullName || fullName === "-") return "-";
+            const upper = fullName.toUpperCase();
             
-            if (uName.includes("CHIEF JUSTICE")) return "DB-1";
-            if (uName.includes("SINDHU")) return "DB-2";
-            if (uName.includes("RAJNESH")) return "Oswal"; 
-            if (uName.includes("JAVED")) return "Iwani";
-            if (uName.includes("RAHUL")) return "Bharti";
-            if (uName.includes("MOKSHA")) return "Kazmi";
-            if (uName.includes("YOUSUF")) return "Ywani";
-            if (uName.includes("SHAHZAD")) return "Azeem";
-            if (uName.includes("REGISTRAR")) return "RJ";
-            if (uName.includes("SANJAY")) return "Sanjay";
-            if (uName.includes("PUNEET")) return "Puneet";
-            if (uName.includes("MAHESH")) return "Mahesh";
-            if (uName.includes("WASIM")) return "Wasim";
-            if (uName.includes("RAJESH")) return "Rajesh";
-            if (uName.includes("VINOD")) return "Vinod";
+            // Division Bench Rule: Replace with Bench ID
+            if (upper.includes("&") || upper.includes(" AND ")) {
+                return (benchNo && benchNo !== "-") ? benchNo : fullName;
+            }
             
-            return fullName.replace(/HON'BLE\s*(MR\.|MS\.|MRS\.)?\s*JUSTICE\s*/i, "").trim();
+            // Single Judge Rule: Regex strip formal prefixes
+            if (upper.includes("REGISTRAR JUDICIAL")) return "Registrar Judicial";
+
+            let cleaned = fullName.replace(/HON'BLE|MR\.|MRS\.|MS\.|JUSTICE|\bMR\b|\bMS\b|\bMRS\b/gi, "");
+            return cleaned.replace(/\s+/g, " ").trim();
         }
 
-        // --- V38: ROBUST INDEX SCANNING (Sorted Blob + Multi-Line Regex) ---
+        // --- V38: MULTI-LANE INDEX SCANNING (Extracts Both Court & Justices) ---
         function buildVisualBenchMap(items) {
             const map = {};
-            map["DB-I"] = "1"; map["DB-1"] = "1";
-            map["SB-I"] = "1"; map["SB-1"] = "1";
-            map["DB-II"] = "3"; map["DB-11"] = "3";
-            map["SB-II"] = "4"; map["SB-11"] = "4";
-            map["SB-III"] = "7";
-            map["SB-IV"] = "9";
-            map["SB-V"] = "10";
-            
-            const rows = {};
-            const tolerance = 10; 
+            let xBench = 50, xJudge = 200, xMonday = 400;
 
             items.forEach(item => {
+                const text = item.str.toUpperCase();
+                const x = item.transform[4];
+                if (text.includes("BENCH") && x < 150) xBench = x;
+                if ((text.includes("HON'BLE") || text.includes("JUDGE")) && x > 100 && x < 350) xJudge = x;
+                if (text.includes("MONDAY") && x > 300) xMonday = x;
+            });
+
+            const divider1 = xBench + (xJudge - xBench) / 2;
+            const divider2 = xJudge + (xMonday - xJudge) / 2;
+
+            const rowsY = {};
+            const yTolerance = 5;
+
+            items.forEach(item => {
+                const x = item.transform[4];
+                const y = item.transform[5];
+                
+                if (x > divider2) return; // Ignore Days of the Week columns
+                
                 let foundY = null;
-                for (const y in rows) { if (Math.abs(y - item.transform[5]) < tolerance) { foundY = y; break; } }
-                if (!foundY) foundY = item.transform[5];
-                if (!rows[foundY]) rows[foundY] = [];
-                rows[foundY].push(item);
+                for (const rowY in rowsY) { 
+                    if (Math.abs(rowY - y) < yTolerance) { foundY = rowY; break; } 
+                }
+                if (!foundY) foundY = y;
+                if (!rowsY[foundY]) rowsY[foundY] = { lane1: [], lane2: [] };
+                
+                if (x < divider1) rowsY[foundY].lane1.push(item);
+                else rowsY[foundY].lane2.push(item);
             });
 
-            const sortedY = Object.keys(rows).sort((a, b) => b - a);
-            const textLines = sortedY.map(y => {
-                const rowItems = rows[y].sort((a, b) => a.transform[4] - b.transform[4]);
-                return rowItems.map(i => i.str).join(" ");
+            const sortedY = Object.keys(rowsY).sort((a, b) => b - a);
+
+            let blocks = [];
+            let currentBlock = { lane1: [], lane2: [] };
+            let lastY = null;
+
+            sortedY.forEach(y => {
+                const numY = parseFloat(y);
+                const l1Text = rowsY[y].lane1.sort((a, b) => a.transform[4] - b.transform[4]).map(i => i.str).join(" ").trim();
+                const l2Text = rowsY[y].lane2.sort((a, b) => a.transform[4] - b.transform[4]).map(i => i.str).join(" ").trim();
+                
+                if (!l1Text && !l2Text) return;
+                
+                if (lastY !== null) {
+                    const gap = lastY - numY;
+                    if (gap > 20) { 
+                        if (currentBlock.lane1.length > 0 || currentBlock.lane2.length > 0) blocks.push(currentBlock);
+                        currentBlock = { lane1: [], lane2: [] };
+                    }
+                }
+                
+                if (l1Text) currentBlock.lane1.push(l1Text);
+                if (l2Text) currentBlock.lane2.push(l2Text);
+                lastY = numY;
+            });
+            if (currentBlock.lane1.length > 0 || currentBlock.lane2.length > 0) blocks.push(currentBlock);
+
+            blocks.forEach(block => {
+                const combinedJudgeStr = block.lane2.join(" ");
+                block.lane1.forEach((line, idx) => {
+                    const upperLine = line.toUpperCase();
+                    const benchMatch = upperLine.match(/(DB|SB)\s*[-–]?\s*([IVX0-9]+)/);
+                    const courtMatch = upperLine.match(/COURT\s*(?:NO\.?)?\s*(\d+)/);
+                    
+                    if (benchMatch && courtMatch) {
+                        const type = benchMatch[1];
+                        const num = benchMatch[2];
+                        const court = courtMatch[1];
+                        
+                        let assignedJudge = block.lane1.length === 1 ? combinedJudgeStr : (block.lane2[idx] || combinedJudgeStr);
+                        assignedJudge = assignedJudge.replace(/\s+/g, " ").trim();
+                        
+                        const variants = getBenchVariants(type, num);
+                        variants.forEach(v => { 
+                            map[v] = { court: court, justices: assignedJudge }; 
+                            log(`Spatial Map: Found ${v} -> Court ${court} | Judges: ${assignedJudge}`); 
+                        });
+                    }
+                });
             });
 
-            const fullText = textLines.join("\n");
-            
-            const indexRegex = /(DB|SB)\s*[-–]?\s*([IVX0-9]+)[^\d]*?COURT\s*NO\.?\s*(\d+)/gsi;
-            let match;
-            while ((match = indexRegex.exec(fullText)) !== null) {
-                const type = match[1].toUpperCase();
-                const num = match[2].toUpperCase();
-                const court = match[3];
-                const variants = getBenchVariants(type, num);
-                variants.forEach(v => { map[v] = court; log(`Index Scan: Found ${v} -> Court ${court}`); });
-            }
+            if (!map["DB-I"]) map["DB-I"] = { court: "1", justices: "-" };
+            if (!map["DB-1"]) map["DB-1"] = { court: "1", justices: "-" };
+            if (!map["SB-I"]) map["SB-I"] = { court: "1", justices: "-" };
+            if (!map["SB-1"]) map["SB-1"] = { court: "1", justices: "-" };
+
             return map;
         }
 
@@ -378,16 +417,13 @@
                     };
 
                     const headerItems = textContent.items.filter(item => item.transform[5] > 600);
-                    // Sort top-down, left-right
                     headerItems.sort((a,b) => b.transform[5] - a.transform[5] || a.transform[4] - b.transform[4]);
                     
-                    // Reconstruct header string from sorted items for reliable regex
                     let headerString = headerItems.map(i => i.str.toUpperCase()).join(" ");
                     
-                    // Registrar Judicial Check
                     if (headerString.includes("REGISTRAR JUDICIAL")) {
                          pageObj.justices.push("REGISTRAR JUDICIAL");
-                         pageObj.headerCourt = "RJ"; // Special "Court No" for RJ
+                         pageObj.headerCourt = "RJ";
                     }
 
                     const pDateMatch = headerString.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
@@ -398,22 +434,15 @@
                         currentActiveDate = `${d}/${m}/${y}`;
                     }
 
-                    // Fallback Court Logic
-                    // 1. Explicit "Court No X"
                     const fallbackMatch = headerString.match(/COURT\s*(?:NO\.?)?\s*(\d+)/);
                     if (fallbackMatch && !headerString.includes("HIGH") && !headerString.includes("SUPREME")) {
                         pageObj.headerCourt = fallbackMatch[1];
                     } 
-                    // 2. Implicit Number (e.g. just "13" alone in header) - ONLY if no explicit court found
                     else if (!pageObj.headerCourt) {
-                        // Look for standalone digits in header items
                         for(let item of headerItems) {
-                            // Exclude Page numbers
                             if (item.str.match(/^\d+$/) && !headerString.includes(`PAGE ${item.str}`)) {
-                                // Heuristic: Court numbers are usually small (1-20)
                                 const val = parseInt(item.str);
                                 if (val > 0 && val < 20) {
-                                    // Verify it's not part of a date
                                     if (!headerString.includes(`/${item.str}/`) && !headerString.includes(`-${item.str}-`)) {
                                         pageObj.headerCourt = item.str;
                                         log(`Page ${i}: Inferred Court ${item.str} from standalone number`);
@@ -441,7 +470,6 @@
                             continue; 
                         }
                         if (upper.includes("HON'BLE")) { currentCaseObj = null; pageObj.justices.push(line.trim()); continue; }
-                        // Catch RJ in body if missed in header
                         if (upper.includes("REGISTRAR JUDICIAL")) { pageObj.justices.push("REGISTRAR JUDICIAL"); }
 
                         const explicitMatch = line.match(/^(\d+)\s+([A-Za-z\.\(\)\s\-\&]+\d+\/\d+)\s*(.*)/i);
@@ -490,22 +518,23 @@
                 let currentCourt = "-";
                 let currentJustices = "-";
 
-                // TWO-PASS Assignment to handle Look-Ahead for Court No
                 for (let i = 0; i < allPages.length; i++) {
                     const p = allPages[i];
                     const nextP = allPages[i+1];
 
                     if (p.benchStart) {
                         currentBench = p.benchStart;
-                        // Update justices if found on this page
-                        if (p.justices.length > 0) currentJustices = p.justices.join(" & ");
+                        currentJustices = "-"; // Reset for new bench
                         
-                        // Strategy: Map -> Next Page Header -> Current Page Header
                         let lookupKey = currentBench.replace(/[^A-Z0-9-]/g, ""); 
-                        if (benchCourtMap[lookupKey]) {
-                            currentCourt = benchCourtMap[lookupKey];
+                        let mapInfo = benchCourtMap[lookupKey];
+                        
+                        if (mapInfo) {
+                            currentCourt = mapInfo.court;
+                            if (mapInfo.justices && mapInfo.justices !== "-") {
+                                currentJustices = mapInfo.justices;
+                            }
                         } else {
-                            // Check Next Page for Court No (if continuation)
                             if (nextP && !nextP.benchStart && nextP.headerCourt) {
                                 currentCourt = nextP.headerCourt;
                             } else if (p.headerCourt) {
@@ -514,11 +543,19 @@
                                 currentCourt = "-";
                             }
                         }
+                        
+                        // Fallback check: if index mapping failed to get judges, grab from page scrape
+                        if (currentJustices === "-" && p.justices.length > 0) {
+                            currentJustices = p.justices.join(" & ");
+                        }
+                        
                     } else if (!currentCourt || currentCourt === "-") {
-                        // Continuation page can update court info
                         if (p.headerCourt) currentCourt = p.headerCourt;
-                        // Continuation page can update justices (rare but possible)
-                        if (p.justices.length > 0) currentJustices = p.justices.join(" & ");
+                    }
+                    
+                    // Continuous fallback check if continuation page provides missing judges
+                    if ((!currentJustices || currentJustices === "-") && p.justices.length > 0) {
+                         currentJustices = p.justices.join(" & ");
                     }
                     
                     p.cases.forEach(c => {
@@ -538,12 +575,8 @@
                 statusText.textContent = "Finalizing...";
                 progressBar.style.width = "100%";
 
-                // MODIFIED: Hybrid Processing Logic
                 processedResults = csvData.map(row => {
                     let cType = "", cNum = "", sheetTitle = "";
-                    
-                    // We forced array structure in parseFile. row._original is an array.
-                    // But safeguard in case user uploaded weird file or _original is obj
                     const vals = Array.isArray(row._original) ? row._original : Object.values(row._original);
                     
                     const v0 = vals[0] ? String(vals[0]).trim() : "";
@@ -551,19 +584,14 @@
                     const v2 = vals[2] ? String(vals[2]).trim() : "";
                     const v3 = vals[3] ? String(vals[3]).trim() : "";
 
-                    // SMART DETECT: Is Col 0 a Serial Number?
-                    // Heuristic: v0 is just digits (max 5 chars) AND v1 contains letters (likely case type)
-                    // This handles "1, WP(C), 123" structure
                     const isSerialValue = /^\d{1,5}$/.test(v0);
-                    const isTypeCol1 = /[a-zA-Z]/.test(v1); // Case type usually has letters
+                    const isTypeCol1 = /[a-zA-Z]/.test(v1);
 
                     if (isSerialValue && isTypeCol1) {
-                        // Shift Right (Skip Col 0)
                         cType = v1;
                         cNum = v2;
                         sheetTitle = v3;
                     } else {
-                        // Standard Position (Col 0 is Case Type)
                         cType = v0;
                         cNum = v1;
                         sheetTitle = v2;
@@ -571,10 +599,8 @@
 
                     const searchId = normalizeCaseString(cType + cNum);
                     const match = caseMap[searchId];
-
-                    // Apply Short Names
                     const rawJustices = match ? match.justices : "-";
-                    const shortJustices = shortenJusticeName(rawJustices);
+                    const shortJustices = shortenJusticeName(rawJustices, match ? match.bench : "-");
 
                     return {
                         csvCaseNo: `${cType} ${cNum}`,
@@ -590,13 +616,11 @@
                     };
                 });
 
+                // STRICT ALPHABETICAL SORT BY CASE TITLE
                 processedResults.sort((a, b) => {
-                    const getNum = (val) => { if (!val || val === "-") return 999999; const num = parseInt(val, 10); return isNaN(num) ? 999999 : num; };
-                    const itemA = getNum(a.itemNo), itemB = getNum(b.itemNo);
-                    if (itemA !== itemB) return itemA - itemB;
-                    const courtA = getNum(a.courtNo), courtB = getNum(b.courtNo);
-                    if (courtA !== courtB) return courtA - courtB;
-                    return a.date.localeCompare(b.date);
+                    const titleA = (a.sheetTitle || "").toString().toLowerCase();
+                    const titleB = (b.sheetTitle || "").toString().toLowerCase();
+                    return titleA.localeCompare(titleB);
                 });
 
                 renderResults();
@@ -642,8 +666,8 @@
                 tr.innerHTML = `
                     <td class="px-4 py-3 font-mono text-slate-700 font-bold">${res.itemNo}</td>
                     <td class="px-4 py-3 bg-purple-50 text-purple-700 font-bold">${res.courtNo}</td>
-                    <td class="px-4 py-3 bg-blue-50 text-blue-700 font-bold">${res.benchNo}</td>
                     <td class="px-4 py-3 text-gray-500 text-xs max-w-xs truncate" title="${res.justices}">${res.justices}</td>
+                    <td class="px-4 py-3 bg-blue-50 text-blue-700 font-bold">${res.benchNo}</td>
                     <td class="px-4 py-3 font-medium">${res.csvCaseNo}</td>
                     <td class="px-4 py-3 text-gray-600 max-w-xs truncate" title="${res.sheetTitle}">${res.sheetTitle}</td>
                     <td class="px-4 py-3 text-gray-600">${res.pdfRef}</td>
@@ -663,21 +687,64 @@
             const exportData = processedResults.map(row => {
                 const itemNum = parseInt(row.itemNo);
                 const courtNum = parseInt(row.courtNo);
+                
                 return {
                     "Item No": isNaN(itemNum) ? row.itemNo : itemNum,
                     "Court No": isNaN(courtNum) ? row.courtNo : courtNum,
-                    "Bench No": row.benchNo,
                     "Justices": row.justices,
+                    "Bench No": row.benchNo,
                     "Case Type & No": row.csvCaseNo,
                     "Case Title": row.sheetTitle,
+                    "Case Title From Sheet": "", // Blank Column
+                    "Case Title Check": "",      // Placeholder for Formula
                     "PDF Match": row.pdfRef,
                     "PDF Title": row.pdfTitle,
                     "Date": row.date,
                     "Match Status": row.status
                 };
             });
+
             const wb = XLSX.utils.book_new();
             const ws = XLSX.utils.json_to_sheet(exportData);
+            
+            const range = XLSX.utils.decode_range(ws['!ref']);
+
+            // Set Column Widths (100px)
+            const cols = [];
+            for (let c = range.s.c; c <= range.e.c; ++c) {
+                cols.push({ wpx: 100 });
+            }
+            ws['!cols'] = cols;
+
+            // Set Row Heights (65px)
+            const rows = [];
+            for (let r = range.s.r; r <= range.e.r; ++r) {
+                rows.push({ hpx: 65 });
+            }
+            ws['!rows'] = rows;
+
+            // Apply Formulas and Styles (Top, Left, Wrap Text)
+            for (let r = range.s.r; r <= range.e.r; ++r) {
+                for (let c = range.s.c; c <= range.e.c; ++c) {
+                    const cellRef = XLSX.utils.encode_cell({r: r, c: c});
+                    if (!ws[cellRef]) continue;
+
+                    // Apply formula to "Case Title Check" (Column H -> Index 7)
+                    if (c === 7 && r > 0) {
+                        ws[cellRef] = { f: `F${r + 1}=G${r + 1}` };
+                    }
+
+                    // Apply unified styling
+                    ws[cellRef].s = {
+                        alignment: {
+                            vertical: "top",
+                            horizontal: "left",
+                            wrapText: true
+                        }
+                    };
+                }
+            }
+
             XLSX.utils.book_append_sheet(wb, ws, "Matched Cases");
             XLSX.writeFile(wb, "matched_cases_report.xlsx");
         }
