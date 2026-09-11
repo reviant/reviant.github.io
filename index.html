@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legal Case Matcher V38 (JSON Proxy Sync)</title>
+    <title>Legal Case Matcher V38 (Direct Sync)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -151,9 +151,10 @@
 
     <script>
         // ==========================================
-        // CONFIGURATION: [https://docs.google.com/spreadsheets/d/e/2PACX-1vREbfnA_z60qZ_HG-cOo46hhE0wGcsXgFSZ_nI0V5SteGLtlTeblGG2iiWg5GuX0bLtiEQ_Az6IltWe/pub?gid=1275703740&single=true&output=csv]
+        // CONFIGURATION: https://docs.google.com/spreadsheets/d/e/2PACX-1vREbfnA_z60qZ_HG-cOo46hhE0wGcsXgFSZ_nI0V5SteGLtlTeblGG2iiWg5GuX0bLtiEQ_Az6IltWe/pub?gid=1275703740&single=true&output=csv
+        // MAKE SURE THERE ARE NO BRACKETS [ ] IN THE URL!
         // ==========================================
-        const GOOGLE_SHEET_URL = "[https://docs.google.com/spreadsheets/d/e/2PACX-1vREbfnA_z60qZ_HG-cOo46hhE0wGcsXgFSZ_nI0V5SteGLtlTeblGG2iiWg5GuX0bLtiEQ_Az6IltWe/pub?gid=1275703740&single=true&output=csv]";
+        const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vREbfnA_z60qZ_HG-cOo46hhE0wGcsXgFSZ_nI0V5SteGLtlTeblGG2iiWg5GuX0bLtiEQ_Az6IltWe/pub?gid=1275703740&single=true&output=csv";
         // ==========================================
 
         // --- Init ---
@@ -200,7 +201,7 @@
             }
         });
 
-        // --- GOOGLE SHEETS FETCH LOGIC WITH JSON-WRAPPER BYPASS ---
+        // --- GOOGLE SHEETS FETCH LOGIC (DIRECT FETCH FOR GITHUB PAGES) ---
         async function syncGoogleSheet() {
             if (GOOGLE_SHEET_URL === "YOUR_PUBLISHED_CSV_LINK_HERE" || !GOOGLE_SHEET_URL) {
                 showError("Please update the GOOGLE_SHEET_URL in the code with your actual link.");
@@ -216,19 +217,12 @@
                 btn.disabled = true;
                 btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Syncing...';
                 
-                // Fetching via the /get endpoint which wraps the CSV inside a JSON package
-                const proxyUrl = "https://api.allorigins.win/get?url=" + encodeURIComponent(GOOGLE_SHEET_URL);
-                const response = await fetch(proxyUrl);
+                // Fetch directly from the Google URL (works because it's hosted on GitHub Pages)
+                const response = await fetch(GOOGLE_SHEET_URL);
                 
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 
-                // Unwrap the JSON package
-                const data = await response.json();
-                
-                // Ensure data was actually retrieved
-                if (!data.contents) throw new Error("Could not retrieve data from the URL.");
-                
-                const csvText = data.contents;
+                const csvText = await response.text();
                 
                 const hasHeaders = document.getElementById('has-headers').checked;
                 const res = Papa.parse(csvText, { header: false, skipEmptyLines: true });
@@ -243,10 +237,11 @@
                 countSpan.textContent = csvData.length;
                 statusDiv.classList.remove('hidden');
                 checkReady();
-                log("Google Sheet Synced via JSON Proxy. Loaded " + csvData.length + " rows.");
+                log("Google Sheet Synced directly. Loaded " + csvData.length + " rows.");
 
             } catch (error) {
                 showError("Error syncing Google Sheet: " + error.message);
+                console.error(error);
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
