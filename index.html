@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legal Case Matcher V38 (Hybrid Fix)</title>
+    <title>Legal Case Matcher V38 (Google Sheets Sync)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -65,20 +65,22 @@
 
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        <!-- Upload Section -->
+        <!-- Upload & Sync Section -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <!-- CSV Upload -->
+            <!-- Google Sheets Sync -->
             <div class="flex flex-col">
-                <label class="block text-sm font-medium text-slate-700 mb-2">1. Case List (CSV/XLSX)</label>
-                <div id="drop-zone-csv" class="flex-1 relative border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer group bg-white">
-                    <i class="fa-solid fa-file-excel text-4xl text-slate-400 mb-3 block group-hover:text-green-500 transition-colors"></i>
-                    <p id="csv-filename" class="text-sm text-slate-600 mb-4">Click here to upload Case List</p>
-                    <input type="file" id="csv-input" accept=".csv, .xlsx, .xls" class="hidden">
+                <label class="block text-sm font-medium text-slate-700 mb-2">1. Case List (Google Sheets)</label>
+                <div class="flex-1 bg-white border border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center text-center shadow-sm">
+                    <i class="fa-brands fa-google-drive text-4xl text-green-600 mb-4"></i>
+                    <button id="sync-sheet-btn" onclick="syncGoogleSheet()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2">
+                        <i class="fa-solid fa-rotate"></i> Sync Google Sheet
+                    </button>
+                    <p class="text-xs text-slate-500 mt-4">Pulls data from Columns F, G, and H</p>
                 </div>
                 <div class="mt-3 flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
                     <div class="flex items-center">
                         <input type="checkbox" id="has-headers" checked class="w-4 h-4 text-blue-600 rounded">
-                        <label for="has-headers" class="ml-2 text-sm text-gray-700">File has Header Row</label>
+                        <label for="has-headers" class="ml-2 text-sm text-gray-700">Sheet has Header Row</label>
                     </div>
                     <div id="csv-status" class="text-xs font-medium text-green-600 hidden flex items-center gap-2"><i class="fa-solid fa-check-circle"></i> <span id="csv-count">0</span> loaded</div>
                 </div>
@@ -148,6 +150,12 @@
     </main>
 
     <script>
+        // ==========================================
+        // CONFIGURATION: https://docs.google.com/spreadsheets/d/e/2PACX-1vREbfnA_z60qZ_HG-cOo46hhE0wGcsXgFSZ_nI0V5SteGLtlTeblGG2iiWg5GuX0bLtiEQ_Az6IltWe/pub?gid=1275703740&single=true&output=csv
+        // ==========================================
+        const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vREbfnA_z60qZ_HG-cOo46hhE0wGcsXgFSZ_nI0V5SteGLtlTeblGG2iiWg5GuX0bLtiEQ_Az6IltWe/pub?gid=1275703740&single=true&output=csv";
+        // ==========================================
+
         // --- Init ---
         window.onload = function() {
             if (typeof pdfjsLib !== 'undefined') {
@@ -166,7 +174,6 @@
             toast.innerText = message;
             container.appendChild(toast);
             
-            // Trigger reflow
             void toast.offsetWidth;
             toast.classList.add('show');
             
@@ -182,11 +189,8 @@
 
         function log(msg) { const div = document.getElementById('debug-log'); div.innerText += "\n" + msg; div.scrollTop = div.scrollHeight; }
 
-        document.getElementById('drop-zone-csv').addEventListener('click', () => document.getElementById('csv-input').click());
         document.getElementById('drop-zone-pdf').addEventListener('click', () => document.getElementById('pdf-input').click());
-        document.getElementById('has-headers').addEventListener('change', () => { if(document.getElementById('csv-input').files[0]) parseFile(document.getElementById('csv-input').files[0]); });
 
-        document.getElementById('csv-input').addEventListener('change', function() { if(this.files[0]) parseFile(this.files[0]); });
         document.getElementById('pdf-input').addEventListener('change', function() {
             if(this.files[0]) {
                 pdfFile = this.files[0];
@@ -196,47 +200,47 @@
             }
         });
 
-        // Parse File with Blind Header Stripping
-        function parseFile(file) {
-            const hasHeaders = document.getElementById('has-headers').checked;
-            document.getElementById('csv-filename').textContent = file.name;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                try {
-                    const data = e.target.result;
-                    let rows = [];
-                    
-                    if (file.name.match(/\.xls.?$/)) {
-                        const workbook = XLSX.read(data, { type: 'binary' });
-                        const sheetName = workbook.SheetNames[0];
-                        const rawRows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1 });
-                        
-                        if(hasHeaders && rawRows.length > 0) {
-                            rows = rawRows.slice(1);
-                        } else {
-                            rows = rawRows;
-                        }
-                    } else {
-                        const res = Papa.parse(data, { header: false, skipEmptyLines: true });
-                        const rawRows = res.data;
+        // --- GOOGLE SHEETS FETCH LOGIC ---
+        async function syncGoogleSheet() {
+            if (GOOGLE_SHEET_URL === "https://docs.google.com/spreadsheets/d/e/2PACX-1vREbfnA_z60qZ_HG-cOo46hhE0wGcsXgFSZ_nI0V5SteGLtlTeblGG2iiWg5GuX0bLtiEQ_Az6IltWe/pub?gid=1275703740&single=true&output=csv") {
+                showError("Please update the GOOGLE_SHEET_URL in the code with your actual link.");
+                return;
+            }
 
-                        if(hasHeaders && rawRows.length > 0) {
-                            rows = rawRows.slice(1);
-                        } else {
-                            rows = rawRows;
-                        }
-                    }
+            const btn = document.getElementById('sync-sheet-btn');
+            const originalHTML = btn.innerHTML;
+            const statusDiv = document.getElementById('csv-status');
+            const countSpan = document.getElementById('csv-count');
+            
+            try {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Syncing...';
+                
+                const response = await fetch(GOOGLE_SHEET_URL);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const csvText = await response.text();
+                
+                const hasHeaders = document.getElementById('has-headers').checked;
+                const res = Papa.parse(csvText, { header: false, skipEmptyLines: true });
+                
+                let rawRows = res.data;
+                if(hasHeaders && rawRows.length > 0) {
+                    rawRows = rawRows.slice(1);
+                }
 
-                    csvData = rows.map(row => {
-                        return { _original: row };
-                    });
+                csvData = rawRows.map(row => { return { _original: row }; });
+                
+                countSpan.textContent = csvData.length;
+                statusDiv.classList.remove('hidden');
+                checkReady();
+                log("Google Sheet Synced. Loaded " + csvData.length + " rows.");
 
-                    document.getElementById('csv-count').textContent = csvData.length;
-                    document.getElementById('csv-status').classList.remove('hidden');
-                    checkReady();
-                } catch(err) { showError("Error parsing file: " + err.message); }
-            };
-            if(file.name.match(/\.xls.?$/)) reader.readAsBinaryString(file); else reader.readAsText(file);
+            } catch (error) {
+                showError("Error syncing Google Sheet: " + error.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = originalHTML;
+            }
         }
 
         function checkReady() {
@@ -249,7 +253,6 @@
 
         function normalizeCaseString(text) { return String(text || "").replace(/[^a-zA-Z0-9]/g, '').toUpperCase(); }
 
-        // --- Helper: Normalize Bench IDs ---
         function getBenchVariants(type, num) {
             const variants = [`${type}-${num}`];
             const map = {'1':'I','2':'II','3':'III','4':'IV','5':'V','6':'VI','I':'1','II':'2','III':'3','IV':'4','V':'5','VI':'6','11':'II'};
@@ -257,24 +260,22 @@
             return variants;
         }
 
-        // --- Helper: Dynamic Name Shortener ---
+        // --- Dynamic Name Shortener (Division Bench Rule + Regex Clean) ---
         function shortenJusticeName(fullName, benchNo) {
             if (!fullName || fullName === "-") return "-";
             const upper = fullName.toUpperCase();
             
-            // Division Bench Rule: Replace with Bench ID
             if (upper.includes("&") || upper.includes(" AND ")) {
                 return (benchNo && benchNo !== "-") ? benchNo : fullName;
             }
             
-            // Single Judge Rule: Regex strip formal prefixes
             if (upper.includes("REGISTRAR JUDICIAL")) return "Registrar Judicial";
 
             let cleaned = fullName.replace(/HON'BLE|MR\.|MRS\.|MS\.|JUSTICE|\bMR\b|\bMS\b|\bMRS\b/gi, "");
             return cleaned.replace(/\s+/g, " ").trim();
         }
 
-        // --- V38: MULTI-LANE INDEX SCANNING (Extracts Both Court & Justices) ---
+        // --- MULTI-LANE INDEX SCANNING ---
         function buildVisualBenchMap(items) {
             const map = {};
             let xBench = 50, xJudge = 200, xMonday = 400;
@@ -297,7 +298,7 @@
                 const x = item.transform[4];
                 const y = item.transform[5];
                 
-                if (x > divider2) return; // Ignore Days of the Week columns
+                if (x > divider2) return; 
                 
                 let foundY = null;
                 for (const rowY in rowsY) { 
@@ -524,7 +525,7 @@
 
                     if (p.benchStart) {
                         currentBench = p.benchStart;
-                        currentJustices = "-"; // Reset for new bench
+                        currentJustices = "-"; 
                         
                         let lookupKey = currentBench.replace(/[^A-Z0-9-]/g, ""); 
                         let mapInfo = benchCourtMap[lookupKey];
@@ -544,7 +545,7 @@
                             }
                         }
                         
-                        // Fallback check: if index mapping failed to get judges, grab from page scrape
+                        // Fallback check
                         if (currentJustices === "-" && p.justices.length > 0) {
                             currentJustices = p.justices.join(" & ");
                         }
@@ -553,7 +554,6 @@
                         if (p.headerCourt) currentCourt = p.headerCourt;
                     }
                     
-                    // Continuous fallback check if continuation page provides missing judges
                     if ((!currentJustices || currentJustices === "-") && p.justices.length > 0) {
                          currentJustices = p.justices.join(" & ");
                     }
@@ -576,26 +576,12 @@
                 progressBar.style.width = "100%";
 
                 processedResults = csvData.map(row => {
-                    let cType = "", cNum = "", sheetTitle = "";
                     const vals = Array.isArray(row._original) ? row._original : Object.values(row._original);
                     
-                    const v0 = vals[0] ? String(vals[0]).trim() : "";
-                    const v1 = vals[1] ? String(vals[1]).trim() : "";
-                    const v2 = vals[2] ? String(vals[2]).trim() : "";
-                    const v3 = vals[3] ? String(vals[3]).trim() : "";
-
-                    const isSerialValue = /^\d{1,5}$/.test(v0);
-                    const isTypeCol1 = /[a-zA-Z]/.test(v1);
-
-                    if (isSerialValue && isTypeCol1) {
-                        cType = v1;
-                        cNum = v2;
-                        sheetTitle = v3;
-                    } else {
-                        cType = v0;
-                        cNum = v1;
-                        sheetTitle = v2;
-                    }
+                    // Specific Google Sheet Columns: F(5), G(6), H(7)
+                    const cType = vals[5] ? String(vals[5]).trim() : "";
+                    const cNum = vals[6] ? String(vals[6]).trim() : "";
+                    const sheetTitle = vals[7] ? String(vals[7]).trim() : "";
 
                     const searchId = normalizeCaseString(cType + cNum);
                     const match = caseMap[searchId];
@@ -696,7 +682,7 @@
                     "Case Type & No": row.csvCaseNo,
                     "Case Title": row.sheetTitle,
                     "Case Title From Sheet": "", // Blank Column
-                    "Case Title Check": "",      // Placeholder for Formula
+                    "Case Title Check": "",      // Formula setup
                     "PDF Match": row.pdfRef,
                     "PDF Title": row.pdfTitle,
                     "Date": row.date,
@@ -709,32 +695,31 @@
             
             const range = XLSX.utils.decode_range(ws['!ref']);
 
-            // Set Column Widths (100px)
+            // Formatting: 100px Widths
             const cols = [];
             for (let c = range.s.c; c <= range.e.c; ++c) {
                 cols.push({ wpx: 100 });
             }
             ws['!cols'] = cols;
 
-            // Set Row Heights (65px)
+            // Formatting: 65px Heights
             const rows = [];
             for (let r = range.s.r; r <= range.e.r; ++r) {
                 rows.push({ hpx: 65 });
             }
             ws['!rows'] = rows;
 
-            // Apply Formulas and Styles (Top, Left, Wrap Text)
+            // Loop to inject formulas and Styles (Top, Left, Wrap Text)
             for (let r = range.s.r; r <= range.e.r; ++r) {
                 for (let c = range.s.c; c <= range.e.c; ++c) {
                     const cellRef = XLSX.utils.encode_cell({r: r, c: c});
                     if (!ws[cellRef]) continue;
 
-                    // Apply formula to "Case Title Check" (Column H -> Index 7)
+                    // Formula Column H (Index 7)
                     if (c === 7 && r > 0) {
                         ws[cellRef] = { f: `F${r + 1}=G${r + 1}` };
                     }
 
-                    // Apply unified styling
                     ws[cellRef].s = {
                         alignment: {
                             vertical: "top",
