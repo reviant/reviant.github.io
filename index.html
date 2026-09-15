@@ -523,19 +523,20 @@
             const originalHTML = btn.innerHTML;
             
             if (processedResults.length === 0) {
-                showMessage("No updates to send.");
+                showMessage("No updates to push.");
                 return;
             }
 
             try {
                 btn.disabled = true;
-                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Updating...';
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing Updates...';
                 
                 const payload = processedResults.map(res => {
                     return {
                         row: res.rowIndex, 
-                        itemNo: res.itemNo,
-                        courtNo: res.courtNo,
+                        // This converts them to numbers if they are digits, or leaves them as text if they have letters (like "RJ")
+                        itemNo: isNaN(Number(res.itemNo)) ? res.itemNo : Number(res.itemNo),
+                        courtNo: isNaN(Number(res.courtNo)) ? res.courtNo : Number(res.courtNo),
                         justices: res.justices,
                         date: res.date
                     };
@@ -553,7 +554,7 @@
                 const result = await response.json();
                 
                 if (result.status === "success") {
-                    showMessage("Google Sheet updated!", true);
+                    showMessage("Successfully updated live Google Sheet!", true);
                     btn.innerHTML = '<i class="fa-solid fa-check"></i> Sheet Updated';
                     btn.classList.replace('bg-green-600', 'bg-slate-400');
                 } else {
@@ -561,7 +562,7 @@
                 }
 
             } catch (error) {
-                showMessage("Error: " + error.message);
+                showMessage("Error pushing updates: " + error.message);
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
             }
