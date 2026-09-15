@@ -3,15 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legal Case Matcher V40.1 (Live Sync & Fixes)</title>
+    <title>Legal Case Matcher V41 (Final Fixes)</title>
     
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- PDF.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-
-    <!-- Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
     <style>
@@ -43,7 +38,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i></div>
-                <h1 class="text-xl font-bold text-slate-800">Case Matcher V40.1</h1>
+                <h1 class="text-xl font-bold text-slate-800">Case Matcher V41</h1>
             </div>
         </div>
     </nav>
@@ -51,7 +46,6 @@
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-            <!-- Google Sheets Sync -->
             <div class="flex flex-col">
                 <label class="block text-sm font-medium text-slate-700 mb-2">1. Master Case List (Apps Script)</label>
                 <div class="flex-1 bg-white border border-slate-200 rounded-xl p-8 flex flex-col items-center justify-center text-center shadow-sm">
@@ -59,7 +53,6 @@
                     <button id="sync-sheet-btn" onclick="syncGoogleSheet()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2">
                         <i class="fa-solid fa-cloud-arrow-down"></i> Pull Data from Sheet
                     </button>
-                    <p class="text-xs text-slate-500 mt-4">Pulls display values directly from the web app</p>
                 </div>
                 <div class="mt-3 flex items-center justify-between bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
                     <div class="flex items-center">
@@ -70,7 +63,6 @@
                 </div>
             </div>
 
-            <!-- PDF Upload -->
             <div class="flex flex-col">
                 <label class="block text-sm font-medium text-slate-700 mb-2">2. Cause List (PDF)</label>
                 <div id="drop-zone-pdf" class="flex-1 relative border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer group bg-white">
@@ -91,7 +83,7 @@
         </div>
 
         <div id="progress-container" class="hidden max-w-2xl mx-auto mb-8">
-            <div class="flex justify-between text-xs text-slate-500 mb-1"><span id="progress-text">Initializing...</span><span id="progress-percent">0%</span></div>
+            <div class="flex justify-between text-xs text-slate-500 mb-1"><span id="progress-text">Loading...</span><span id="progress-percent">0%</span></div>
             <div class="w-full bg-slate-200 rounded-full h-2.5"><div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div></div>
         </div>
 
@@ -99,7 +91,7 @@
             <div class="flex flex-col sm:flex-row justify-between items-end sm:items-center mb-4 gap-4 bg-green-50 p-4 rounded-xl border border-green-200">
                 <div>
                     <h3 class="text-xl font-bold text-slate-800">Ready to Update</h3>
-                    <p class="text-sm text-slate-600">Found <span id="match-count" class="font-bold text-green-700">0</span> exact matches to push back to Google Sheets.</p>
+                    <p class="text-sm text-slate-600">Found <span id="match-count" class="font-bold text-green-700">0</span> matches.</p>
                 </div>
                 <button id="push-btn" onclick="pushUpdatesToSheet()" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2.5 rounded-lg font-medium transition-colors shadow-sm flex items-center gap-2 text-sm sm:text-base">
                     <i class="fa-solid fa-cloud-arrow-up"></i> Update Live Sheet
@@ -116,7 +108,7 @@
                             <th class="px-4 py-3">Justices</th>
                             <th class="px-4 py-3">Case Type & No</th>
                             <th class="px-4 py-3">Title</th>
-                            <th class="px-4 py-3 bg-yellow-50">Assigned Date</th>
+                            <th class="px-4 py-3 bg-yellow-50">Date</th>
                         </tr>
                     </thead>
                     <tbody id="results-body" class="divide-y divide-slate-200"></tbody>
@@ -125,9 +117,9 @@
         </div>
 
         <div class="max-w-7xl mx-auto">
-            <button onclick="document.getElementById('debug-container').classList.toggle('hidden')" class="text-xs text-slate-500 underline mb-2">Toggle Debug Log</button>
+            <button onclick="document.getElementById('debug-container').classList.toggle('hidden')" class="text-xs text-slate-500 underline mb-2">Show Debug Log</button>
             <div id="debug-container" class="hidden bg-slate-900 text-green-400 p-4 rounded-lg shadow-inner h-64 overflow-y-auto">
-                <div id="debug-log">System Ready...</div>
+                <div id="debug-log">Ready...</div>
             </div>
         </div>
 
@@ -135,7 +127,7 @@
 
     <script>
         // ==========================================
-        // CONFIGURATION: https://script.google.com/macros/s/AKfycbyuthxtz-QYwrFLhW7JLNGb9ocT56dA1-nKoOfGJ_I930kqRE74GQkCNEdjoT1hORpg/exec
+        // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE
         // ==========================================
         const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyuthxtz-QYwrFLhW7JLNGb9ocT56dA1-nKoOfGJ_I930kqRE74GQkCNEdjoT1hORpg/exec";
         // ==========================================
@@ -177,7 +169,7 @@
 
         async function syncGoogleSheet() {
             if (GOOGLE_WEB_APP_URL === "YOUR_WEB_APP_URL_HERE" || !GOOGLE_WEB_APP_URL) {
-                showMessage("Please enter your Web App URL in the code.");
+                showMessage("Please put your Web App URL in the code.");
                 return;
             }
 
@@ -187,7 +179,7 @@
             
             try {
                 btn.disabled = true;
-                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pulling Data...';
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading Data...';
                 
                 const response = await fetch(GOOGLE_WEB_APP_URL);
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
@@ -208,10 +200,10 @@
                 document.getElementById('csv-count').textContent = sheetDataRaw.length;
                 statusDiv.classList.remove('hidden');
                 checkReady();
-                log("Data pulled directly from Apps Script. Rows: " + sheetDataRaw.length);
+                log("Data pulled. Rows: " + sheetDataRaw.length);
 
             } catch (error) {
-                showMessage("Error syncing Google Sheet: " + error.message);
+                showMessage("Error: " + error.message);
                 console.error(error);
             } finally {
                 btn.disabled = false;
@@ -310,7 +302,7 @@
             const statusText = document.getElementById('progress-text');
 
             btn.disabled = true;
-            statusText.textContent = "Scanning PDF...";
+            statusText.textContent = "Reading PDF...";
             document.getElementById('progress-container').classList.remove('hidden');
             document.getElementById('results-section').classList.add('hidden');
 
@@ -319,20 +311,28 @@
                 const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                 const allPages = [];
                 let causeListDate = "-";
+                let benchCourtMap = {};
 
-                const page1 = await pdf.getPage(1);
-                const text1 = await page1.getTextContent();
-                
-                // FIXED: Support for both 2-digit and 4-digit years in index parsing
-                const rawBlob1 = text1.items.map(i => i.str).join(" ");
-                const dateMatch = rawBlob1.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
-                if(dateMatch) {
-                    let y = dateMatch[3];
-                    if (y.length === 4) y = y.substring(2); // Convert to yy
-                    causeListDate = `${dateMatch[1].padStart(2,'0')}/${dateMatch[2].padStart(2,'0')}/${y}`;
+                // Find the Index Page (Search first 5 pages)
+                for(let pg = 1; pg <= Math.min(5, pdf.numPages); pg++) {
+                    const page = await pdf.getPage(pg);
+                    const textContent = await page.getTextContent();
+                    const rawText = textContent.items.map(i => i.str).join(" ").toUpperCase();
+                    
+                    if (rawText.includes("REGULAR CAUSE LIST") && rawText.includes("INDEX")) {
+                        log("Found Index on Page " + pg);
+                        benchCourtMap = buildVisualBenchMap(textContent.items);
+                        
+                        // Extract Date
+                        const dateMatch = rawText.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+                        if(dateMatch) {
+                            let y = dateMatch[3];
+                            if (y.length === 4) y = y.substring(2);
+                            causeListDate = `${dateMatch[1].padStart(2,'0')}/${dateMatch[2].padStart(2,'0')}/${y}`;
+                        }
+                        break;
+                    }
                 }
-                
-                const benchCourtMap = buildVisualBenchMap(text1.items);
 
                 let currentActiveItemNo = "-"; 
                 let currentCaseObj = null;
@@ -350,16 +350,27 @@
                     
                     if (headerString.includes("REGISTRAR JUDICIAL")) { pageObj.justices.push("REGISTRAR JUDICIAL"); pageObj.headerCourt = "RJ"; }
                     
-                    // FIXED: Support for both 2-digit and 4-digit years on page headers
                     const pDateMatch = headerString.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
                     if (pDateMatch) {
                         let y = pDateMatch[3];
-                        if (y.length === 4) y = y.substring(2); // Convert to yy
+                        if (y.length === 4) y = y.substring(2);
                         currentActiveDate = `${pDateMatch[1].padStart(2,'0')}/${pDateMatch[2].padStart(2,'0')}/${y}`;
                     }
 
+                    // Court Number extraction with backup plan
                     const fallbackMatch = headerString.match(/COURT\s*(?:NO\.?)?\s*(\d+)/);
-                    if (fallbackMatch && !headerString.includes("HIGH")) pageObj.headerCourt = fallbackMatch[1];
+                    if (fallbackMatch && !headerString.includes("HIGH")) {
+                        pageObj.headerCourt = fallbackMatch[1];
+                    } else {
+                        // Backup Plan: Look for a single number at the very top
+                        for (let j = 0; j < headerItems.length; j++) {
+                            let text = headerItems[j].str.trim();
+                            if (/^\d{1,2}$/.test(text) && headerItems[j].transform[5] > 700) {
+                                pageObj.headerCourt = text;
+                                break;
+                            }
+                        }
+                    }
 
                     for (let j = 0; j < lines.length; j++) {
                         const line = lines[j];
@@ -421,7 +432,7 @@
                     if ((!currentJustices || currentJustices === "-") && p.justices.length > 0) currentJustices = p.justices.join(" & ");
                     
                     p.cases.forEach(c => {
-                        // FIXED: Re-added the crucial 'bench: currentBench' variable from V38
+                        // Map holds bench id to fix the judge name issue
                         caseMap[c.cleanId] = { item: c.itemNo, court: currentCourt, justices: currentJustices, bench: currentBench, date: p.assignedDate };
                     });
                 }
@@ -447,7 +458,6 @@
                             status: "Exact",
                             itemNo: match.item,
                             courtNo: match.court,
-                            // FIXED: Use the case's specific bench for correct name shortening
                             justices: shortenJusticeName(match.justices, match.bench),
                             csvCaseNo: `${cType} ${cNum}`,
                             sheetTitle: sheetTitle,
@@ -459,7 +469,7 @@
                 renderResults();
 
             } catch (error) {
-                showMessage("Processing Error: " + error.message);
+                showMessage("Error: " + error.message);
                 console.error(error);
             } finally {
                 btn.disabled = false;
@@ -513,13 +523,13 @@
             const originalHTML = btn.innerHTML;
             
             if (processedResults.length === 0) {
-                showMessage("No updates to push.");
+                showMessage("No updates to send.");
                 return;
             }
 
             try {
                 btn.disabled = true;
-                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing Updates...';
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Updating...';
                 
                 const payload = processedResults.map(res => {
                     return {
@@ -543,7 +553,7 @@
                 const result = await response.json();
                 
                 if (result.status === "success") {
-                    showMessage("Successfully updated live Google Sheet!", true);
+                    showMessage("Google Sheet updated!", true);
                     btn.innerHTML = '<i class="fa-solid fa-check"></i> Sheet Updated';
                     btn.classList.replace('bg-green-600', 'bg-slate-400');
                 } else {
@@ -551,7 +561,7 @@
                 }
 
             } catch (error) {
-                showMessage("Error pushing updates: " + error.message);
+                showMessage("Error: " + error.message);
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
             }
