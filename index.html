@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legal Case Matcher V40 (Direct Google Sheet Updater)</title>
+    <title>Legal Case Matcher V40.1 (Live Sync & Fixes)</title>
     
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -43,7 +43,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i></div>
-                <h1 class="text-xl font-bold text-slate-800">Case Matcher V40 (Live Sync)</h1>
+                <h1 class="text-xl font-bold text-slate-800">Case Matcher V40.1</h1>
             </div>
         </div>
     </nav>
@@ -135,9 +135,9 @@
 
     <script>
         // ==========================================
-        // CONFIGURATION: https://script.google.com/macros/s/AKfycbyuthxtz-QYwrFLhW7JLNGb9ocT56dA1-nKoOfGJ_I930kqRE74GQkCNEdjoT1hORpg/exec
+        // CONFIGURATION: PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE
         // ==========================================
-        const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyuthxtz-QYwrFLhW7JLNGb9ocT56dA1-nKoOfGJ_I930kqRE74GQkCNEdjoT1hORpg/exec";
+        const GOOGLE_WEB_APP_URL = "YOUR_WEB_APP_URL_HERE";
         // ==========================================
 
         window.onload = function() {
@@ -192,17 +192,16 @@
                 const response = await fetch(GOOGLE_WEB_APP_URL);
                 if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 
-                // The Web App returns a 2D JSON array of native strings
                 const data = await response.json();
                 
                 sheetDataRaw = [];
                 const hasHeaders = document.getElementById('has-headers').checked;
                 
                 data.forEach((row, index) => {
-                    if (hasHeaders && index === 0) return; // Skip header row visually, but preserve row index logic
+                    if (hasHeaders && index === 0) return; 
                     sheetDataRaw.push({
                         _original: row,
-                        rowIndex: index + 1 // Keep track of the Google Sheet Row Number (1-based index)
+                        rowIndex: index + 1
                     });
                 });
                 
@@ -323,8 +322,16 @@
 
                 const page1 = await pdf.getPage(1);
                 const text1 = await page1.getTextContent();
-                const dateMatch = text1.items.map(i => i.str).join(" ").match(/(\d{2})[\/\-\.](\d{2})[\/\-\.](\d{4})/);
-                if(dateMatch) causeListDate = `${dateMatch[1]}/${dateMatch[2]}/${dateMatch[3]}`;
+                
+                // FIXED: Support for both 2-digit and 4-digit years in index parsing
+                const rawBlob1 = text1.items.map(i => i.str).join(" ");
+                const dateMatch = rawBlob1.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+                if(dateMatch) {
+                    let y = dateMatch[3];
+                    if (y.length === 4) y = y.substring(2); // Convert to yy
+                    causeListDate = `${dateMatch[1].padStart(2,'0')}/${dateMatch[2].padStart(2,'0')}/${y}`;
+                }
+                
                 const benchCourtMap = buildVisualBenchMap(text1.items);
 
                 let currentActiveItemNo = "-"; 
@@ -343,8 +350,13 @@
                     
                     if (headerString.includes("REGISTRAR JUDICIAL")) { pageObj.justices.push("REGISTRAR JUDICIAL"); pageObj.headerCourt = "RJ"; }
                     
-                    const pDateMatch = headerString.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-                    if (pDateMatch) currentActiveDate = `${pDateMatch[1].padStart(2,'0')}/${pDateMatch[2].padStart(2,'0')}/${pDateMatch[3]}`;
+                    // FIXED: Support for both 2-digit and 4-digit years on page headers
+                    const pDateMatch = headerString.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+                    if (pDateMatch) {
+                        let y = pDateMatch[3];
+                        if (y.length === 4) y = y.substring(2); // Convert to yy
+                        currentActiveDate = `${pDateMatch[1].padStart(2,'0')}/${pDateMatch[2].padStart(2,'0')}/${y}`;
+                    }
 
                     const fallbackMatch = headerString.match(/COURT\s*(?:NO\.?)?\s*(\d+)/);
                     if (fallbackMatch && !headerString.includes("HIGH")) pageObj.headerCourt = fallbackMatch[1];
@@ -409,7 +421,8 @@
                     if ((!currentJustices || currentJustices === "-") && p.justices.length > 0) currentJustices = p.justices.join(" & ");
                     
                     p.cases.forEach(c => {
-                        caseMap[c.cleanId] = { item: c.itemNo, court: currentCourt, justices: currentJustices, date: p.assignedDate };
+                        // FIXED: Re-added the crucial 'bench: currentBench' variable from V38
+                        caseMap[c.cleanId] = { item: c.itemNo, court: currentCourt, justices: currentJustices, bench: currentBench, date: p.assignedDate };
                     });
                 }
 
@@ -417,12 +430,10 @@
 
                 processedResults = [];
                 
-                // Map over Google Sheet data. Retain sequence and row numbers.
                 sheetDataRaw.forEach(rowObj => {
                     const vals = rowObj._original;
                     const rowIndex = rowObj.rowIndex;
                     
-                    // Col F(5), G(6), H(7)
                     const cType = vals[5] ? String(vals[5]).trim() : "";
                     const cNum = vals[6] ? String(vals[6]).trim() : "";
                     const sheetTitle = vals[7] ? String(vals[7]).trim() : "";
@@ -432,11 +443,12 @@
 
                     if (match) {
                         processedResults.push({
-                            rowIndex: rowIndex, // Important: Tells the server exactly which row to update
+                            rowIndex: rowIndex, 
                             status: "Exact",
                             itemNo: match.item,
                             courtNo: match.court,
-                            justices: shortenJusticeName(match.justices, currentBench),
+                            // FIXED: Use the case's specific bench for correct name shortening
+                            justices: shortenJusticeName(match.justices, match.bench),
                             csvCaseNo: `${cType} ${cNum}`,
                             sheetTitle: sheetTitle,
                             date: match.date
@@ -509,7 +521,6 @@
                 btn.disabled = true;
                 btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing Updates...';
                 
-                // Package the exact updates
                 const payload = processedResults.map(res => {
                     return {
                         row: res.rowIndex, 
@@ -520,12 +531,11 @@
                     };
                 });
 
-                // Send to Google Apps Script
                 const response = await fetch(GOOGLE_WEB_APP_URL, {
                     method: 'POST',
-                    redirect: 'follow', // Required for Google Scripts
+                    redirect: 'follow', 
                     headers: {
-                        "Content-Type": "text/plain;charset=utf-8", // Bypasses strict CORS preflight
+                        "Content-Type": "text/plain;charset=utf-8", 
                     },
                     body: JSON.stringify(payload)
                 });
