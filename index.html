@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legal Case Matcher V41 (Final Fixes)</title>
+    <title>Legal Case Matcher V42 (Multi-PDF & Supp List)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -38,7 +38,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i></div>
-                <h1 class="text-xl font-bold text-slate-800">Case Matcher V41</h1>
+                <h1 class="text-xl font-bold text-slate-800">Case Matcher V42</h1>
             </div>
         </div>
     </nav>
@@ -67,11 +67,11 @@
                 <label class="block text-sm font-medium text-slate-700 mb-2">2. Cause List (PDF)</label>
                 <div id="drop-zone-pdf" class="flex-1 relative border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer group bg-white">
                     <i class="fa-solid fa-file-pdf text-4xl text-slate-400 mb-3 block group-hover:text-red-500 transition-colors"></i>
-                    <p id="pdf-filename" class="text-sm text-slate-600 mb-4">Click here to upload PDF</p>
-                    <input type="file" id="pdf-input" accept=".pdf" class="hidden">
+                    <p id="pdf-filename" class="text-sm text-slate-600 mb-4">Click here to upload PDFs</p>
+                    <input type="file" id="pdf-input" accept=".pdf" multiple class="hidden">
                 </div>
                 <div class="mt-3 p-3 bg-white rounded-lg border border-slate-200 shadow-sm min-h-[50px] flex items-center">
-                    <div id="pdf-status" class="text-xs font-medium text-blue-600 hidden flex items-center gap-2"><i class="fa-solid fa-check-circle"></i> PDF Ready</div>
+                    <div id="pdf-status" class="text-xs font-medium text-blue-600 hidden flex items-center gap-2"><i class="fa-solid fa-check-circle"></i> PDFs Ready</div>
                 </div>
             </div>
         </div>
@@ -153,15 +153,15 @@
             log((isSuccess ? "SUCCESS: " : "ERROR: ") + message);
         }
 
-        let sheetDataRaw = [], pdfFile = null, processedResults = [];
+        let sheetDataRaw = [], pdfFiles = [], processedResults = [];
 
         function log(msg) { const div = document.getElementById('debug-log'); div.innerText += "\n" + msg; div.scrollTop = div.scrollHeight; }
 
         document.getElementById('drop-zone-pdf').addEventListener('click', () => document.getElementById('pdf-input').click());
         document.getElementById('pdf-input').addEventListener('change', function() {
-            if(this.files[0]) {
-                pdfFile = this.files[0];
-                document.getElementById('pdf-filename').textContent = pdfFile.name;
+            if(this.files.length > 0) {
+                pdfFiles = Array.from(this.files);
+                document.getElementById('pdf-filename').textContent = pdfFiles.length + " PDF file(s) selected";
                 document.getElementById('pdf-status').classList.remove('hidden');
                 checkReady();
             }
@@ -212,7 +212,7 @@
         }
 
         function checkReady() {
-            if (sheetDataRaw.length > 0 && pdfFile) {
+            if (sheetDataRaw.length > 0 && pdfFiles.length > 0) {
                 document.getElementById('process-btn').disabled = false;
                 document.getElementById('process-btn').classList.remove('bg-slate-300', 'text-slate-500', 'cursor-not-allowed');
                 document.getElementById('process-btn').classList.add('bg-blue-600', 'hover:bg-blue-700', 'text-white');
@@ -306,135 +306,154 @@
             document.getElementById('progress-container').classList.remove('hidden');
             document.getElementById('results-section').classList.add('hidden');
 
+            const caseMap = {};
+
             try {
-                const arrayBuffer = await pdfFile.arrayBuffer();
-                const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-                const allPages = [];
-                let causeListDate = "-";
-                let benchCourtMap = {};
-
-                // Find the Index Page (Search first 5 pages)
-                for(let pg = 1; pg <= Math.min(5, pdf.numPages); pg++) {
-                    const page = await pdf.getPage(pg);
-                    const textContent = await page.getTextContent();
-                    const rawText = textContent.items.map(i => i.str).join(" ").toUpperCase();
+                for (let fileIndex = 0; fileIndex < pdfFiles.length; fileIndex++) {
+                    const file = pdfFiles[fileIndex];
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                     
-                    if (rawText.includes("REGULAR CAUSE LIST") && rawText.includes("INDEX")) {
-                        log("Found Index on Page " + pg);
-                        benchCourtMap = buildVisualBenchMap(textContent.items);
+                    const allPages = [];
+                    let causeListDate = "-";
+                    let benchCourtMap = {};
+                    let isSupplementary = true;
+
+                    for(let pg = 1; pg <= Math.min(5, pdf.numPages); pg++) {
+                        const page = await pdf.getPage(pg);
+                        const textContent = await page.getTextContent();
+                        const rawText = textContent.items.map(i => i.str).join(" ").toUpperCase();
                         
-                        // Extract Date
-                        const dateMatch = rawText.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
-                        if(dateMatch) {
-                            let y = dateMatch[3];
+                        if (rawText.includes("REGULAR CAUSE LIST") && rawText.includes("INDEX")) {
+                            log("Found Index in file: " + file.name);
+                            isSupplementary = false;
+                            benchCourtMap = buildVisualBenchMap(textContent.items);
+                            
+                            const dateMatch = rawText.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+                            if(dateMatch) {
+                                let y = dateMatch[3];
+                                if (y.length === 4) y = y.substring(2);
+                                causeListDate = `${dateMatch[1].padStart(2,'0')}/${dateMatch[2].padStart(2,'0')}/${y}`;
+                            }
+                            break;
+                        }
+                    }
+
+                    if (isSupplementary) {
+                        log("No index found. Treating file as Supplementary List: " + file.name);
+                    }
+
+                    let currentActiveItemNo = "-"; 
+                    let currentCaseObj = null;
+                    let currentActiveDate = causeListDate; 
+
+                    for (let i = 1; i <= pdf.numPages; i++) {
+                        let totalProgress = ((fileIndex / pdfFiles.length) * 100) + ((i / pdf.numPages) * (100 / pdfFiles.length) * 0.8);
+                        progressBar.style.width = `${Math.round(totalProgress)}%`;
+                        
+                        const textContent = await (await pdf.getPage(i)).getTextContent();
+                        const lines = reconstructLinesV5(textContent.items);
+                        
+                        let pageObj = { pageNum: i, benchStart: null, headerCourt: null, justices: [], cases: [], pageDate: null };
+
+                        const headerItems = textContent.items.filter(item => item.transform[5] > 600);
+                        const headerString = headerItems.sort((a,b) => b.transform[5] - a.transform[5] || a.transform[4] - b.transform[4]).map(i => i.str.toUpperCase()).join(" ");
+                        
+                        if (headerString.includes("REGISTRAR JUDICIAL")) { pageObj.justices.push("REGISTRAR JUDICIAL"); pageObj.headerCourt = "RJ"; }
+                        
+                        const pDateMatch = headerString.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
+                        if (pDateMatch) {
+                            let y = pDateMatch[3];
                             if (y.length === 4) y = y.substring(2);
-                            causeListDate = `${dateMatch[1].padStart(2,'0')}/${dateMatch[2].padStart(2,'0')}/${y}`;
+                            currentActiveDate = `${pDateMatch[1].padStart(2,'0')}/${pDateMatch[2].padStart(2,'0')}/${y}`;
                         }
-                        break;
-                    }
-                }
 
-                let currentActiveItemNo = "-"; 
-                let currentCaseObj = null;
-                let currentActiveDate = causeListDate; 
-
-                for (let i = 1; i <= pdf.numPages; i++) {
-                    progressBar.style.width = `${Math.round((i/pdf.numPages)*60)}%`;
-                    const textContent = await (await pdf.getPage(i)).getTextContent();
-                    const lines = reconstructLinesV5(textContent.items);
-                    
-                    let pageObj = { pageNum: i, benchStart: null, headerCourt: null, justices: [], cases: [], pageDate: null };
-
-                    const headerItems = textContent.items.filter(item => item.transform[5] > 600);
-                    const headerString = headerItems.sort((a,b) => b.transform[5] - a.transform[5] || a.transform[4] - b.transform[4]).map(i => i.str.toUpperCase()).join(" ");
-                    
-                    if (headerString.includes("REGISTRAR JUDICIAL")) { pageObj.justices.push("REGISTRAR JUDICIAL"); pageObj.headerCourt = "RJ"; }
-                    
-                    const pDateMatch = headerString.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
-                    if (pDateMatch) {
-                        let y = pDateMatch[3];
-                        if (y.length === 4) y = y.substring(2);
-                        currentActiveDate = `${pDateMatch[1].padStart(2,'0')}/${pDateMatch[2].padStart(2,'0')}/${y}`;
-                    }
-
-                    // Court Number extraction with backup plan
-                    const fallbackMatch = headerString.match(/COURT\s*(?:NO\.?)?\s*(\d+)/);
-                    if (fallbackMatch && !headerString.includes("HIGH")) {
-                        pageObj.headerCourt = fallbackMatch[1];
-                    } else {
-                        // Backup Plan: Look for a single number at the very top
-                        for (let j = 0; j < headerItems.length; j++) {
-                            let text = headerItems[j].str.trim();
-                            if (/^\d{1,2}$/.test(text) && headerItems[j].transform[5] > 700) {
-                                pageObj.headerCourt = text;
-                                break;
+                        if (!isSupplementary) {
+                            const fallbackMatch = headerString.match(/COURT\s*(?:NO\.?)?\s*(\d+)/);
+                            if (fallbackMatch && !headerString.includes("HIGH")) {
+                                pageObj.headerCourt = fallbackMatch[1];
+                            } else {
+                                for (let j = 0; j < headerItems.length; j++) {
+                                    let text = headerItems[j].str.trim();
+                                    if (/^\d{1,2}$/.test(text) && headerItems[j].transform[5] > 700) {
+                                        pageObj.headerCourt = text;
+                                        break;
+                                    }
+                                }
                             }
                         }
-                    }
 
-                    for (let j = 0; j < lines.length; j++) {
-                        const line = lines[j];
-                        const upper = line.toUpperCase();
+                        for (let j = 0; j < lines.length; j++) {
+                            const line = lines[j];
+                            const upper = line.toUpperCase();
 
-                        if (upper.includes("BENCH NO")) {
-                            currentCaseObj = null;
-                            const m = line.match(/BENCH\s*NO[.:\s]*([A-Z0-9-]+)/i);
-                            if(m) { 
-                                let bId = m[1].trim().toUpperCase().replace("-11", "-II").replace("-1", "-I");
-                                pageObj.benchStart = bId; currentActiveItemNo = "-"; 
+                            if (upper.includes("BENCH NO")) {
+                                currentCaseObj = null;
+                                const m = line.match(/BENCH\s*NO[.:\s]*([A-Z0-9-]+)/i);
+                                if(m) { 
+                                    let bId = m[1].trim().toUpperCase().replace("-11", "-II").replace("-1", "-I");
+                                    pageObj.benchStart = bId; currentActiveItemNo = "-"; 
+                                }
+                                continue; 
                             }
-                            continue; 
-                        }
-                        if (upper.includes("HON'BLE")) { currentCaseObj = null; pageObj.justices.push(line.trim()); continue; }
-                        if (upper.includes("REGISTRAR JUDICIAL")) { pageObj.justices.push("REGISTRAR JUDICIAL"); }
+                            if (upper.includes("HON'BLE")) { currentCaseObj = null; pageObj.justices.push(line.trim()); continue; }
+                            if (upper.includes("REGISTRAR JUDICIAL")) { pageObj.justices.push("REGISTRAR JUDICIAL"); }
 
-                        const explicitMatch = line.match(/^(\d+)\s+([A-Za-z\.\(\)\s\-\&]+\d+\/\d+)\s*(.*)/i);
-                        if (explicitMatch) {
-                            currentActiveItemNo = explicitMatch[1];
-                            currentCaseObj = { itemNo: currentActiveItemNo, cleanId: normalizeCaseString(explicitMatch[2]), pdfTitle: explicitMatch[3].trim() };
-                            pageObj.cases.push(currentCaseObj); continue;
-                        }
-
-                        const cleanLine = line.replace(/^c\/w\s*/i, "").trim();
-                        const implicitMatch = cleanLine.match(/^([A-Za-z\.\(\)\s\-\&]+\d+\/\d+)\s*(.*)/i);
-                        if (implicitMatch && currentActiveItemNo !== "-" && (line.toLowerCase().startsWith('c/w') || cleanLine.length > 5)) {
-                             if (cleanLine.match(/[A-Z]/) && cleanLine.match(/\d+\/\d+/)) {
-                                 currentCaseObj = { itemNo: currentActiveItemNo, cleanId: normalizeCaseString(implicitMatch[1]), pdfTitle: implicitMatch[2].trim() };
+                            const explicitMatch = line.match(/^(\d+)\s+([A-Za-z0-9\.\(\)\s\-\&]+?\d+\/\d+)\s*(.*)/i);
+                            if (explicitMatch) {
+                                currentActiveItemNo = explicitMatch[1];
+                                currentCaseObj = { itemNo: currentActiveItemNo, cleanId: normalizeCaseString(explicitMatch[2]), pdfTitle: explicitMatch[3].trim() };
                                 pageObj.cases.push(currentCaseObj); continue;
-                             }
+                            }
+
+                            const cleanLine = line.replace(/^c\/w\s*/i, "").trim();
+                            const implicitMatch = cleanLine.match(/^([A-Za-z0-9\.\(\)\s\-\&]+?\d+\/\d+)\s*(.*)/i);
+                            if (implicitMatch && currentActiveItemNo !== "-" && (line.toLowerCase().startsWith('c/w') || cleanLine.length > 5)) {
+                                 if (cleanLine.match(/[A-Z]/) && cleanLine.match(/\d+\/\d+/)) {
+                                     currentCaseObj = { itemNo: currentActiveItemNo, cleanId: normalizeCaseString(implicitMatch[1]), pdfTitle: implicitMatch[2].trim() };
+                                    pageObj.cases.push(currentCaseObj); continue;
+                                 }
+                            }
+                            if (currentCaseObj && !line.match(/^Page No/i) && !line.match(/^\d+$/) && currentCaseObj.pdfTitle.length < 500) {
+                                currentCaseObj.pdfTitle += " " + line.trim();
+                            }
                         }
-                        if (currentCaseObj && !line.match(/^Page No/i) && !line.match(/^\d+$/) && currentCaseObj.pdfTitle.length < 500) {
-                            currentCaseObj.pdfTitle += " " + line.trim();
-                        }
+                        pageObj.assignedDate = currentActiveDate;
+                        allPages.push(pageObj);
                     }
-                    pageObj.assignedDate = currentActiveDate;
-                    allPages.push(pageObj);
-                }
 
-                progressBar.style.width = "80%";
-                const caseMap = {};
-                let currentBench = "-", currentCourt = "-", currentJustices = "-";
+                    let currentBench = "-", currentCourt = "-", currentJustices = "-";
 
-                for (let i = 0; i < allPages.length; i++) {
-                    const p = allPages[i], nextP = allPages[i+1];
-                    if (p.benchStart) {
-                        currentBench = p.benchStart; currentJustices = "-"; 
-                        let mapInfo = benchCourtMap[currentBench.replace(/[^A-Z0-9-]/g, "")];
-                        if (mapInfo) {
-                            currentCourt = mapInfo.court;
-                            if (mapInfo.justices && mapInfo.justices !== "-") currentJustices = mapInfo.justices;
+                    for (let i = 0; i < allPages.length; i++) {
+                        const p = allPages[i], nextP = allPages[i+1];
+                        
+                        if (isSupplementary) {
+                            currentCourt = "SL";
+                            if (p.justices.length > 0) {
+                                currentJustices = p.justices.join(" & ");
+                            }
                         } else {
-                            currentCourt = (nextP && !nextP.benchStart && nextP.headerCourt) ? nextP.headerCourt : (p.headerCourt || "-");
+                            if (p.benchStart) {
+                                currentBench = p.benchStart; currentJustices = "-"; 
+                                let mapInfo = benchCourtMap[currentBench.replace(/[^A-Z0-9-]/g, "")];
+                                if (mapInfo) {
+                                    currentCourt = mapInfo.court;
+                                    if (mapInfo.justices && mapInfo.justices !== "-") currentJustices = mapInfo.justices;
+                                } else {
+                                    currentCourt = (nextP && !nextP.benchStart && nextP.headerCourt) ? nextP.headerCourt : (p.headerCourt || "-");
+                                }
+                            } else if (!currentCourt || currentCourt === "-") {
+                                if (p.headerCourt) currentCourt = p.headerCourt;
+                            }
+                            if ((!currentJustices || currentJustices === "-") && p.justices.length > 0) {
+                                currentJustices = p.justices.join(" & ");
+                            }
                         }
-                    } else if (!currentCourt || currentCourt === "-") {
-                        if (p.headerCourt) currentCourt = p.headerCourt;
+                        
+                        p.cases.forEach(c => {
+                            caseMap[c.cleanId] = { item: c.itemNo, court: currentCourt, justices: currentJustices, bench: currentBench, date: p.assignedDate };
+                        });
                     }
-                    if ((!currentJustices || currentJustices === "-") && p.justices.length > 0) currentJustices = p.justices.join(" & ");
-                    
-                    p.cases.forEach(c => {
-                        // Map holds bench id to fix the judge name issue
-                        caseMap[c.cleanId] = { item: c.itemNo, court: currentCourt, justices: currentJustices, bench: currentBench, date: p.assignedDate };
-                    });
                 }
 
                 progressBar.style.width = "100%";
@@ -534,7 +553,6 @@
                 const payload = processedResults.map(res => {
                     return {
                         row: res.rowIndex, 
-                        // This converts them to numbers if they are digits, or leaves them as text if they have letters (like "RJ")
                         itemNo: isNaN(Number(res.itemNo)) ? res.itemNo : Number(res.itemNo),
                         courtNo: isNaN(Number(res.courtNo)) ? res.courtNo : Number(res.courtNo),
                         justices: res.justices,
