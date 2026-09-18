@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legal Case Matcher V43 (Master Index Link)</title>
+    <title>Legal Case Matcher V44 (Verified Map Builder)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -38,7 +38,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i></div>
-                <h1 class="text-xl font-bold text-slate-800">Case Matcher V43</h1>
+                <h1 class="text-xl font-bold text-slate-800">Case Matcher V44</h1>
             </div>
         </div>
     </nav>
@@ -278,18 +278,19 @@
             });
             if (currentBlock.lane1.length > 0 || currentBlock.lane2.length > 0) blocks.push(currentBlock);
 
+            // FIX: Join the strings in the block to catch "DB-II" and "(Court No. 3)" together
             blocks.forEach(block => {
-                const combinedJudgeStr = block.lane2.join(" ");
-                block.lane1.forEach((line, idx) => {
-                    const benchMatch = line.toUpperCase().match(/(DB|SB)\s*[-–]?\s*([IVX0-9]+)/);
-                    const courtMatch = line.toUpperCase().match(/COURT\s*(?:NO\.?)?\s*(\d+)/);
-                    if (benchMatch && courtMatch) {
-                        const type = benchMatch[1], num = benchMatch[2], court = courtMatch[1];
-                        let assignedJudge = block.lane1.length === 1 ? combinedJudgeStr : (block.lane2[idx] || combinedJudgeStr);
-                        assignedJudge = assignedJudge.replace(/\s+/g, " ").trim();
-                        getBenchVariants(type, num).forEach(v => { map[v] = { court: court, justices: assignedJudge }; });
-                    }
-                });
+                const combinedLane1 = block.lane1.join(" ").toUpperCase();
+                const combinedLane2 = block.lane2.join(" ").toUpperCase();
+                
+                const benchMatch = combinedLane1.match(/(DB|SB)\s*[-–]?\s*([IVX0-9]+)/);
+                const courtMatch = combinedLane1.match(/COURT\s*(?:NO\.?)?\s*(\d+)/);
+                
+                if (benchMatch && courtMatch) {
+                    const type = benchMatch[1], num = benchMatch[2], court = courtMatch[1];
+                    let assignedJudge = combinedLane2.replace(/\s+/g, " ").trim();
+                    getBenchVariants(type, num).forEach(v => { map[v] = { court: court, justices: assignedJudge }; });
+                }
             });
             if (!map["DB-I"]) map["DB-I"] = { court: "1", justices: "-" };
             if (!map["SB-I"]) map["SB-I"] = { court: "1", justices: "-" };
@@ -302,28 +303,37 @@
             const statusText = document.getElementById('progress-text');
 
             btn.disabled = true;
-            statusText.textContent = "Reading PDFs...";
+            statusText.textContent = "Loading PDFs into memory...";
             document.getElementById('progress-container').classList.remove('hidden');
             document.getElementById('results-section').classList.add('hidden');
 
             const caseMap = {};
-            let globalBenchCourtMap = {};
             let globalHasIndex = false;
+            let globalBenchCourtMap = {};
             let globalCauseListDate = "-";
 
             try {
-                // Pre-scan all files to find the index page
-                for (let file of pdfFiles) {
+                // Step 1: Safely load all PDFs into memory ONCE to prevent browser double-read errors
+                let loadedPdfs = [];
+                for (let i = 0; i < pdfFiles.length; i++) {
+                    const file = pdfFiles[i];
                     const arrayBuffer = await file.arrayBuffer();
                     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-                    
+                    loadedPdfs.push({ file: file, pdf: pdf });
+                }
+
+                statusText.textContent = "Scanning for Master Index...";
+                
+                // Step 2: Pre-scan the loaded PDFs for the master Index
+                for (let item of loadedPdfs) {
+                    const pdf = item.pdf;
                     for(let pg = 1; pg <= Math.min(5, pdf.numPages); pg++) {
                         const page = await pdf.getPage(pg);
                         const textContent = await page.getTextContent();
                         const rawText = textContent.items.map(i => i.str).join(" ").toUpperCase();
                         
-                        if (rawText.includes("REGULAR CAUSE LIST") && rawText.includes("INDEX")) {
-                            log("Found Index in file: " + file.name);
+                        if (rawText.includes("INDEX") && (rawText.includes("BENCH") || rawText.includes("HON'BLE"))) {
+                            log("Found Index in file: " + item.file.name);
                             globalHasIndex = true;
                             globalBenchCourtMap = buildVisualBenchMap(textContent.items);
                             
@@ -336,26 +346,25 @@
                             break;
                         }
                     }
-                    if (globalHasIndex) break; // Stop looking once we find one index
+                    if (globalHasIndex) break; 
                 }
 
                 if (!globalHasIndex) {
-                    log("No index found in any file. Will use SL for court numbers.");
+                    log("No index found in any file. Will use SL for all court numbers.");
                 }
 
-                // Process all files
-                for (let fileIndex = 0; fileIndex < pdfFiles.length; fileIndex++) {
-                    const file = pdfFiles[fileIndex];
-                    const arrayBuffer = await file.arrayBuffer();
-                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-                    
+                statusText.textContent = "Extracting Cases...";
+
+                // Step 3: Process the cases using the preserved logic
+                for (let fileIndex = 0; fileIndex < loadedPdfs.length; fileIndex++) {
+                    const pdf = loadedPdfs[fileIndex].pdf;
                     const allPages = [];
                     let currentActiveItemNo = "-"; 
                     let currentCaseObj = null;
                     let currentActiveDate = globalCauseListDate; 
 
                     for (let i = 1; i <= pdf.numPages; i++) {
-                        let totalProgress = ((fileIndex / pdfFiles.length) * 100) + ((i / pdf.numPages) * (100 / pdfFiles.length) * 0.8);
+                        let totalProgress = ((fileIndex / loadedPdfs.length) * 100) + ((i / pdf.numPages) * (100 / loadedPdfs.length) * 0.8);
                         progressBar.style.width = `${Math.round(totalProgress)}%`;
                         
                         const textContent = await (await pdf.getPage(i)).getTextContent();
@@ -406,6 +415,7 @@
                             if (upper.includes("HON'BLE")) { currentCaseObj = null; pageObj.justices.push(line.trim()); continue; }
                             if (upper.includes("REGISTRAR JUDICIAL")) { pageObj.justices.push("REGISTRAR JUDICIAL"); }
 
+                            // Preserved Lazy Matching Regex
                             const explicitMatch = line.match(/^(\d+)\s+([A-Za-z0-9\.\(\)\s\-\&]+?\d+\/\d+)\s*(.*)/i);
                             if (explicitMatch) {
                                 currentActiveItemNo = explicitMatch[1];
@@ -413,6 +423,7 @@
                                 pageObj.cases.push(currentCaseObj); continue;
                             }
 
+                            // Preserved Lazy Matching Regex
                             const cleanLine = line.replace(/^c\/w\s*/i, "").trim();
                             const implicitMatch = cleanLine.match(/^([A-Za-z0-9\.\(\)\s\-\&]+?\d+\/\d+)\s*(.*)/i);
                             if (implicitMatch && currentActiveItemNo !== "-" && (line.toLowerCase().startsWith('c/w') || cleanLine.length > 5)) {
@@ -544,6 +555,7 @@
             document.getElementById('progress-container').classList.add('hidden');
         }
 
+        // Preserved Number Format Pushing Logic
         async function pushUpdatesToSheet() {
             const btn = document.getElementById('push-btn');
             const originalHTML = btn.innerHTML;
@@ -579,7 +591,7 @@
                 const result = await response.json();
                 
                 if (result.status === "success") {
-                    showMessage("Google Sheet updated!", true);
+                    showMessage("Successfully updated live Google Sheet!", true);
                     btn.innerHTML = '<i class="fa-solid fa-check"></i> Sheet Updated';
                     btn.classList.replace('bg-green-600', 'bg-slate-400');
                 } else {
@@ -587,7 +599,7 @@
                 }
 
             } catch (error) {
-                showMessage("Error: " + error.message);
+                showMessage("Error pushing updates: " + error.message);
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
             }
