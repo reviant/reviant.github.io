@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legal Case Matcher V42 (Multi-PDF & Supp List)</title>
+    <title>Legal Case Matcher V43 (Master Index Link)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -38,7 +38,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i></div>
-                <h1 class="text-xl font-bold text-slate-800">Case Matcher V42</h1>
+                <h1 class="text-xl font-bold text-slate-800">Case Matcher V43</h1>
             </div>
         </div>
     </nav>
@@ -302,23 +302,21 @@
             const statusText = document.getElementById('progress-text');
 
             btn.disabled = true;
-            statusText.textContent = "Reading PDF...";
+            statusText.textContent = "Reading PDFs...";
             document.getElementById('progress-container').classList.remove('hidden');
             document.getElementById('results-section').classList.add('hidden');
 
             const caseMap = {};
+            let globalBenchCourtMap = {};
+            let globalHasIndex = false;
+            let globalCauseListDate = "-";
 
             try {
-                for (let fileIndex = 0; fileIndex < pdfFiles.length; fileIndex++) {
-                    const file = pdfFiles[fileIndex];
+                // Pre-scan all files to find the index page
+                for (let file of pdfFiles) {
                     const arrayBuffer = await file.arrayBuffer();
                     const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                     
-                    const allPages = [];
-                    let causeListDate = "-";
-                    let benchCourtMap = {};
-                    let isSupplementary = true;
-
                     for(let pg = 1; pg <= Math.min(5, pdf.numPages); pg++) {
                         const page = await pdf.getPage(pg);
                         const textContent = await page.getTextContent();
@@ -326,26 +324,35 @@
                         
                         if (rawText.includes("REGULAR CAUSE LIST") && rawText.includes("INDEX")) {
                             log("Found Index in file: " + file.name);
-                            isSupplementary = false;
-                            benchCourtMap = buildVisualBenchMap(textContent.items);
+                            globalHasIndex = true;
+                            globalBenchCourtMap = buildVisualBenchMap(textContent.items);
                             
                             const dateMatch = rawText.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
                             if(dateMatch) {
                                 let y = dateMatch[3];
                                 if (y.length === 4) y = y.substring(2);
-                                causeListDate = `${dateMatch[1].padStart(2,'0')}/${dateMatch[2].padStart(2,'0')}/${y}`;
+                                globalCauseListDate = `${dateMatch[1].padStart(2,'0')}/${dateMatch[2].padStart(2,'0')}/${y}`;
                             }
                             break;
                         }
                     }
+                    if (globalHasIndex) break; // Stop looking once we find one index
+                }
 
-                    if (isSupplementary) {
-                        log("No index found. Treating file as Supplementary List: " + file.name);
-                    }
+                if (!globalHasIndex) {
+                    log("No index found in any file. Will use SL for court numbers.");
+                }
 
+                // Process all files
+                for (let fileIndex = 0; fileIndex < pdfFiles.length; fileIndex++) {
+                    const file = pdfFiles[fileIndex];
+                    const arrayBuffer = await file.arrayBuffer();
+                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                    
+                    const allPages = [];
                     let currentActiveItemNo = "-"; 
                     let currentCaseObj = null;
-                    let currentActiveDate = causeListDate; 
+                    let currentActiveDate = globalCauseListDate; 
 
                     for (let i = 1; i <= pdf.numPages; i++) {
                         let totalProgress = ((fileIndex / pdfFiles.length) * 100) + ((i / pdf.numPages) * (100 / pdfFiles.length) * 0.8);
@@ -368,7 +375,7 @@
                             currentActiveDate = `${pDateMatch[1].padStart(2,'0')}/${pDateMatch[2].padStart(2,'0')}/${y}`;
                         }
 
-                        if (!isSupplementary) {
+                        if (globalHasIndex) {
                             const fallbackMatch = headerString.match(/COURT\s*(?:NO\.?)?\s*(\d+)/);
                             if (fallbackMatch && !headerString.includes("HIGH")) {
                                 pageObj.headerCourt = fallbackMatch[1];
@@ -427,7 +434,7 @@
                     for (let i = 0; i < allPages.length; i++) {
                         const p = allPages[i], nextP = allPages[i+1];
                         
-                        if (isSupplementary) {
+                        if (!globalHasIndex) {
                             currentCourt = "SL";
                             if (p.justices.length > 0) {
                                 currentJustices = p.justices.join(" & ");
@@ -435,7 +442,7 @@
                         } else {
                             if (p.benchStart) {
                                 currentBench = p.benchStart; currentJustices = "-"; 
-                                let mapInfo = benchCourtMap[currentBench.replace(/[^A-Z0-9-]/g, "")];
+                                let mapInfo = globalBenchCourtMap[currentBench.replace(/[^A-Z0-9-]/g, "")];
                                 if (mapInfo) {
                                     currentCourt = mapInfo.court;
                                     if (mapInfo.justices && mapInfo.justices !== "-") currentJustices = mapInfo.justices;
@@ -548,7 +555,7 @@
 
             try {
                 btn.disabled = true;
-                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Pushing Updates...';
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Updating...';
                 
                 const payload = processedResults.map(res => {
                     return {
@@ -572,7 +579,7 @@
                 const result = await response.json();
                 
                 if (result.status === "success") {
-                    showMessage("Successfully updated live Google Sheet!", true);
+                    showMessage("Google Sheet updated!", true);
                     btn.innerHTML = '<i class="fa-solid fa-check"></i> Sheet Updated';
                     btn.classList.replace('bg-green-600', 'bg-slate-400');
                 } else {
@@ -580,7 +587,7 @@
                 }
 
             } catch (error) {
-                showMessage("Error pushing updates: " + error.message);
+                showMessage("Error: " + error.message);
                 btn.disabled = false;
                 btn.innerHTML = originalHTML;
             }
