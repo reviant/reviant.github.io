@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Doda Causelist Maker</title>
+    <title>Case Matcher</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -38,7 +38,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i></div>
-                <h1 class="text-xl font-bold text-slate-800">Case Matcher V46</h1>
+                <h1 class="text-xl font-bold text-slate-800">Case Matcher V47</h1>
             </div>
         </div>
     </nav>
@@ -170,7 +170,6 @@
 
         document.getElementById('drop-zone-pdf').addEventListener('click', () => document.getElementById('pdf-input').click());
         
-        // NEW: UI Logic for appending and removing PDFs
         document.getElementById('pdf-input').addEventListener('change', function() {
             if(this.files.length > 0) {
                 const newFiles = Array.from(this.files);
@@ -273,7 +272,6 @@
             }
         }
 
-        // PRESERVED LOGIC: Exact untouched matching, pre-scanning, and extraction process
         function normalizeCaseString(text) { return String(text || "").replace(/[^a-zA-Z0-9]/g, '').toUpperCase(); }
 
         function getBenchVariants(type, num) {
@@ -292,60 +290,35 @@
             return cleaned.replace(/\s+/g, " ").trim();
         }
 
-        function buildVisualBenchMap(items) {
+        // --- NEW SMART TEXT SCANNING INDEX BUILDER ---
+        function buildTextScanningBenchMap(items) {
             const map = {};
-            let xBench = 50, xJudge = 200, xMonday = 400;
-            items.forEach(item => {
-                const text = item.str.toUpperCase(); const x = item.transform[4];
-                if (text.includes("BENCH") && x < 150) xBench = x;
-                if ((text.includes("HON'BLE") || text.includes("JUDGE")) && x > 100 && x < 350) xJudge = x;
-                if (text.includes("MONDAY") && x > 300) xMonday = x;
-            });
-            const divider1 = xBench + (xJudge - xBench) / 2;
-            const divider2 = xJudge + (xMonday - xJudge) / 2;
-            const rowsY = {}; const yTolerance = 5;
-
-            items.forEach(item => {
-                const x = item.transform[4]; const y = item.transform[5];
-                if (x > divider2) return; 
-                let foundY = null;
-                for (const rowY in rowsY) { if (Math.abs(rowY - y) < yTolerance) { foundY = rowY; break; } }
-                if (!foundY) foundY = y;
-                if (!rowsY[foundY]) rowsY[foundY] = { lane1: [], lane2: [] };
-                if (x < divider1) rowsY[foundY].lane1.push(item); else rowsY[foundY].lane2.push(item);
-            });
-
-            const sortedY = Object.keys(rowsY).sort((a, b) => b - a);
-            let blocks = []; let currentBlock = { lane1: [], lane2: [] }; let lastY = null;
-
-            sortedY.forEach(y => {
-                const numY = parseFloat(y);
-                const l1Text = rowsY[y].lane1.sort((a, b) => a.transform[4] - b.transform[4]).map(i => i.str).join(" ").trim();
-                const l2Text = rowsY[y].lane2.sort((a, b) => a.transform[4] - b.transform[4]).map(i => i.str).join(" ").trim();
-                if (!l1Text && !l2Text) return;
-                if (lastY !== null && (lastY - numY) > 20) { 
-                    if (currentBlock.lane1.length > 0 || currentBlock.lane2.length > 0) blocks.push(currentBlock);
-                    currentBlock = { lane1: [], lane2: [] };
-                }
-                if (l1Text) currentBlock.lane1.push(l1Text);
-                if (l2Text) currentBlock.lane2.push(l2Text);
-                lastY = numY;
-            });
-            if (currentBlock.lane1.length > 0 || currentBlock.lane2.length > 0) blocks.push(currentBlock);
-
-            blocks.forEach(block => {
-                const combinedLane1 = block.lane1.join(" ").toUpperCase();
-                const combinedLane2 = block.lane2.join(" ").toUpperCase();
+            // Concatenate all text from the page into a single stream to ignore layout shifts
+            const rawText = items.map(i => i.str).join(" ").replace(/\s+/g, " ");
+            
+            // Regex actively hunts for DB/SB followed by a dash/number, and then looks for 'Court No' nearby
+            const regex = /(DB|SB)\s*[-–]?\s*([IVX0-9]+).{0,30}?COURT\s*(?:NO\.?)?\s*(\d+)(.*?)(?=(DB|SB)\s*[-–]?\s*[IVX0-9]+.{0,30}?COURT|$)/gi;
+            
+            let match;
+            while ((match = regex.exec(rawText)) !== null) {
+                const type = match[1].toUpperCase();
+                const num = match[2].toUpperCase();
+                const court = match[3];
+                const followingText = match[4];
                 
-                const benchMatch = combinedLane1.match(/(DB|SB)\s*[-–]?\s*([IVX0-9]+)/);
-                const courtMatch = combinedLane1.match(/COURT\s*(?:NO\.?)?\s*(\d+)/);
-                
-                if (benchMatch && courtMatch) {
-                    const type = benchMatch[1], num = benchMatch[2], court = courtMatch[1];
-                    let assignedJudge = combinedLane2.replace(/\s+/g, " ").trim();
-                    getBenchVariants(type, num).forEach(v => { map[v] = { court: court, justices: assignedJudge }; });
+                let justices = "-";
+                // Extracts justice names using proximity
+                const jMatch = followingText.match(/HON'BLE[^\d\*_]*/gi);
+                if(jMatch) {
+                    justices = jMatch.join(" ").replace(/\(Through Virtual Mode\)/gi, "").replace(/\s+/g, " ").trim();
+                    if(justices.endsWith("&")) justices = justices.substring(0, justices.length - 1).trim();
                 }
-            });
+                
+                getBenchVariants(type, num).forEach(v => { 
+                    map[v] = { court: court, justices: justices }; 
+                });
+            }
+            
             if (!map["DB-I"]) map["DB-I"] = { court: "1", justices: "-" };
             if (!map["SB-I"]) map["SB-I"] = { court: "1", justices: "-" };
             return map;
@@ -389,7 +362,8 @@
                         if (rawTextNoSpace.includes("INDEX") && (rawTextNoSpace.includes("CAUSELIST") || rawTextNoSpace.includes("BENCH"))) {
                             log("Found Master Index in: " + item.file.name);
                             globalHasIndex = true;
-                            globalBenchCourtMap = buildVisualBenchMap(textContent.items);
+                            // CALLING NEW SMART SCANNER
+                            globalBenchCourtMap = buildTextScanningBenchMap(textContent.items);
                             
                             const dateMatch = rawText.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
                             if(dateMatch) {
