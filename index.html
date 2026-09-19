@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legal Case Matcher V48 (Smart Text Scanner)</title>
+    <title>Legal Case Matcher</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -38,7 +38,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i></div>
-                <h1 class="text-xl font-bold text-slate-800">Case Matcher V48</h1>
+                <h1 class="text-xl font-bold text-slate-800">Case Matcher For Doda District</h1>
             </div>
         </div>
     </nav>
@@ -138,7 +138,7 @@
 
     <script>
         // ==========================================
-        // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE
+        // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE V49
         // ==========================================
         const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyuthxtz-QYwrFLhW7JLNGb9ocT56dA1-nKoOfGJ_I930kqRE74GQkCNEdjoT1hORpg/exec";
         // ==========================================
@@ -290,9 +290,13 @@
             return cleaned.replace(/\s+/g, " ").trim();
         }
 
+        // --- UPGRADED SMART TEXT SCANNING INDEX BUILDER ---
         function buildTextScanningBenchMap(items) {
             const map = {};
-            const rawText = items.map(i => i.str).join(" ").replace(/\s+/g, " ");
+            // Using reconstructLinesV5 ensures we read the table row-by-row, 
+            // preventing the PDF reader from scrambling columns.
+            const lines = reconstructLinesV5(items);
+            const rawText = lines.join(" ").replace(/\s+/g, " ").toUpperCase();
             
             const regex = /(DB|SB)\s*[-–]?\s*([IVX0-9]+)/gi;
             let match;
@@ -301,13 +305,17 @@
                 const type = match[1].toUpperCase();
                 const num = match[2].toUpperCase();
                 
-                let chunk = rawText.substring(match.index, match.index + 45).toUpperCase();
-                const nextBench = chunk.substring(5).search(/DB|SB/);
+                // Expanded chunk size to 80 characters to capture grouped headers cleanly
+                let chunk = rawText.substring(match.index, match.index + 80).toUpperCase();
+                
+                // Truncate if it hits the next bench so courts aren't mixed up
+                const nextBench = chunk.substring(5).search(/(?:\s|^)(DB|SB)\s*[-–]?\s*[IVX0-9]+/);
                 if (nextBench !== -1) {
                     chunk = chunk.substring(0, nextBench + 5);
                 }
                 
                 let courtNum = "-";
+                // Match patterns like "COURT NO. 5", "COURT 5", or "5) COURT"
                 const courtMatch = chunk.match(/COURT[^\d]{1,15}(\d+)|(\d+)[^\d]{1,15}COURT/);
                 if (courtMatch) {
                     courtNum = courtMatch[1] || courtMatch[2];
@@ -321,6 +329,24 @@
             if (!map["DB-I"]) map["DB-I"] = { court: "1", justices: "-" };
             if (!map["SB-I"]) map["SB-I"] = { court: "1", justices: "-" };
             return map;
+        }
+
+        function reconstructLinesV5(items) {
+            const yTolerance = 5; const linesMap = {};
+            items.forEach(item => {
+                const y = item.transform[5]; let foundKey = null;
+                for (const key in linesMap) { if (Math.abs(parseFloat(key) - y) < yTolerance) { foundKey = key; break; } }
+                if (foundKey) linesMap[foundKey].push(item); else linesMap[y] = [item];
+            });
+            return Object.keys(linesMap).sort((a, b) => parseFloat(b) - parseFloat(a)).map(y => {
+                const lineItems = linesMap[y].sort((a, b) => a.transform[4] - b.transform[4]);
+                let str = "", lastX = 0, lastWidth = 0;
+                lineItems.forEach(item => {
+                    if (lastX > 0 && (item.transform[4] - (lastX + lastWidth)) > 5) str += " ";
+                    str += item.str; lastX = item.transform[4]; lastWidth = item.width;
+                });
+                return str.trim();
+            });
         }
 
         async function startProcessing() {
@@ -358,10 +384,15 @@
                         const rawText = textContent.items.map(i => i.str).join(" ").toUpperCase();
                         const rawTextNoSpace = rawText.replace(/\s+/g, ''); 
                         
-                        if (rawTextNoSpace.includes("INDEX") && (rawTextNoSpace.includes("CAUSELIST") || rawTextNoSpace.includes("BENCH"))) {
+                        // Robust master index verification logic
+                        const isMasterIndex = rawTextNoSpace.includes("REGULARCAUSELIST") && 
+                                             (rawTextNoSpace.includes("BENCH") || rawTextNoSpace.includes("COURTNO"));
+
+                        if (isMasterIndex) {
                             log("Found Master Index in: " + item.file.name);
                             globalHasIndex = true;
                             
+                            // Build map via Row-by-Row Reconstruction
                             globalBenchCourtMap = buildTextScanningBenchMap(textContent.items);
                             
                             const dateMatch = rawText.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
@@ -540,24 +571,6 @@
             } finally {
                 btn.disabled = false;
             }
-        }
-
-        function reconstructLinesV5(items) {
-            const yTolerance = 5; const linesMap = {};
-            items.forEach(item => {
-                const y = item.transform[5]; let foundKey = null;
-                for (const key in linesMap) { if (Math.abs(parseFloat(key) - y) < yTolerance) { foundKey = key; break; } }
-                if (foundKey) linesMap[foundKey].push(item); else linesMap[y] = [item];
-            });
-            return Object.keys(linesMap).sort((a, b) => parseFloat(b) - parseFloat(a)).map(y => {
-                const lineItems = linesMap[y].sort((a, b) => a.transform[4] - b.transform[4]);
-                let str = "", lastX = 0, lastWidth = 0;
-                lineItems.forEach(item => {
-                    if (lastX > 0 && (item.transform[4] - (lastX + lastWidth)) > 5) str += " ";
-                    str += item.str; lastX = item.transform[4]; lastWidth = item.width;
-                });
-                return str.trim();
-            });
         }
 
         function renderResults() {
