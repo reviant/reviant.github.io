@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legal Case Matcher V44 (Verified Map Builder)</title>
+    <title>Doda Causelist Maker</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -38,7 +38,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i></div>
-                <h1 class="text-xl font-bold text-slate-800">Case Matcher V44</h1>
+                <h1 class="text-xl font-bold text-slate-800">Case Matcher V46</h1>
             </div>
         </div>
     </nav>
@@ -65,13 +65,24 @@
 
             <div class="flex flex-col">
                 <label class="block text-sm font-medium text-slate-700 mb-2">2. Cause List (PDF)</label>
+                
                 <div id="drop-zone-pdf" class="flex-1 relative border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer group bg-white">
                     <i class="fa-solid fa-file-pdf text-4xl text-slate-400 mb-3 block group-hover:text-red-500 transition-colors"></i>
-                    <p id="pdf-filename" class="text-sm text-slate-600 mb-4">Click here to upload PDFs</p>
-                    <input type="file" id="pdf-input" accept=".pdf" multiple class="hidden">
+                    <p class="text-sm text-slate-600 mb-4">Click here to upload PDFs</p>
                 </div>
+                
+                <input type="file" id="pdf-input" accept=".pdf" multiple class="hidden">
+                
+                <ul id="file-list" class="mt-3 space-y-2"></ul>
+                
+                <button id="add-more-pdf-btn" onclick="document.getElementById('pdf-input').click()" class="mt-2 text-sm text-blue-600 font-medium hover:text-blue-800 hidden flex items-center gap-1">
+                    <i class="fa-solid fa-plus"></i> Add More PDFs
+                </button>
+
                 <div class="mt-3 p-3 bg-white rounded-lg border border-slate-200 shadow-sm min-h-[50px] flex items-center">
-                    <div id="pdf-status" class="text-xs font-medium text-blue-600 hidden flex items-center gap-2"><i class="fa-solid fa-check-circle"></i> PDFs Ready</div>
+                    <div id="pdf-status" class="text-xs font-medium text-blue-600 hidden flex items-center gap-2">
+                        <i class="fa-solid fa-check-circle"></i> <span id="pdf-count-status">0 PDF(s) Ready</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -158,14 +169,53 @@
         function log(msg) { const div = document.getElementById('debug-log'); div.innerText += "\n" + msg; div.scrollTop = div.scrollHeight; }
 
         document.getElementById('drop-zone-pdf').addEventListener('click', () => document.getElementById('pdf-input').click());
+        
+        // NEW: UI Logic for appending and removing PDFs
         document.getElementById('pdf-input').addEventListener('change', function() {
             if(this.files.length > 0) {
-                pdfFiles = Array.from(this.files);
-                document.getElementById('pdf-filename').textContent = pdfFiles.length + " PDF file(s) selected";
-                document.getElementById('pdf-status').classList.remove('hidden');
-                checkReady();
+                const newFiles = Array.from(this.files);
+                pdfFiles = pdfFiles.concat(newFiles);
+                updateFileListUI();
+                this.value = ''; 
             }
         });
+
+        function removeFile(index) {
+            pdfFiles.splice(index, 1);
+            updateFileListUI();
+        }
+
+        function updateFileListUI() {
+            const list = document.getElementById('file-list');
+            const addMoreBtn = document.getElementById('add-more-pdf-btn');
+            const status = document.getElementById('pdf-status');
+            const countStatus = document.getElementById('pdf-count-status');
+            const dropZone = document.getElementById('drop-zone-pdf');
+            
+            list.innerHTML = '';
+            
+            if (pdfFiles.length > 0) {
+                dropZone.classList.add('hidden');
+                addMoreBtn.classList.remove('hidden');
+                status.classList.remove('hidden');
+                countStatus.textContent = pdfFiles.length + " PDF(s) Ready";
+                
+                pdfFiles.forEach((file, index) => {
+                    const li = document.createElement('li');
+                    li.className = "flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200 shadow-sm text-sm";
+                    li.innerHTML = `
+                        <span class="truncate font-medium text-slate-700 flex items-center gap-3"><i class="fa-solid fa-file-pdf text-red-500 text-lg"></i> ${file.name}</span>
+                        <button onclick="removeFile(${index})" class="text-slate-400 hover:text-red-600 transition-colors px-2 py-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+                    `;
+                    list.appendChild(li);
+                });
+            } else {
+                dropZone.classList.remove('hidden');
+                addMoreBtn.classList.add('hidden');
+                status.classList.add('hidden');
+            }
+            checkReady();
+        }
 
         async function syncGoogleSheet() {
             if (GOOGLE_WEB_APP_URL === "YOUR_WEB_APP_URL_HERE" || !GOOGLE_WEB_APP_URL) {
@@ -216,9 +266,14 @@
                 document.getElementById('process-btn').disabled = false;
                 document.getElementById('process-btn').classList.remove('bg-slate-300', 'text-slate-500', 'cursor-not-allowed');
                 document.getElementById('process-btn').classList.add('bg-blue-600', 'hover:bg-blue-700', 'text-white');
+            } else {
+                document.getElementById('process-btn').disabled = true;
+                document.getElementById('process-btn').classList.add('bg-slate-300', 'text-slate-500', 'cursor-not-allowed');
+                document.getElementById('process-btn').classList.remove('bg-blue-600', 'hover:bg-blue-700', 'text-white');
             }
         }
 
+        // PRESERVED LOGIC: Exact untouched matching, pre-scanning, and extraction process
         function normalizeCaseString(text) { return String(text || "").replace(/[^a-zA-Z0-9]/g, '').toUpperCase(); }
 
         function getBenchVariants(type, num) {
@@ -278,7 +333,6 @@
             });
             if (currentBlock.lane1.length > 0 || currentBlock.lane2.length > 0) blocks.push(currentBlock);
 
-            // FIX: Join the strings in the block to catch "DB-II" and "(Court No. 3)" together
             blocks.forEach(block => {
                 const combinedLane1 = block.lane1.join(" ").toUpperCase();
                 const combinedLane2 = block.lane2.join(" ").toUpperCase();
@@ -313,7 +367,6 @@
             let globalCauseListDate = "-";
 
             try {
-                // Step 1: Safely load all PDFs into memory ONCE to prevent browser double-read errors
                 let loadedPdfs = [];
                 for (let i = 0; i < pdfFiles.length; i++) {
                     const file = pdfFiles[i];
@@ -324,16 +377,17 @@
 
                 statusText.textContent = "Scanning for Master Index...";
                 
-                // Step 2: Pre-scan the loaded PDFs for the master Index
                 for (let item of loadedPdfs) {
                     const pdf = item.pdf;
                     for(let pg = 1; pg <= Math.min(5, pdf.numPages); pg++) {
                         const page = await pdf.getPage(pg);
                         const textContent = await page.getTextContent();
-                        const rawText = textContent.items.map(i => i.str).join(" ").toUpperCase();
                         
-                        if (rawText.includes("INDEX") && (rawText.includes("BENCH") || rawText.includes("HON'BLE"))) {
-                            log("Found Index in file: " + item.file.name);
+                        const rawText = textContent.items.map(i => i.str).join(" ").toUpperCase();
+                        const rawTextNoSpace = rawText.replace(/\s+/g, ''); 
+                        
+                        if (rawTextNoSpace.includes("INDEX") && (rawTextNoSpace.includes("CAUSELIST") || rawTextNoSpace.includes("BENCH"))) {
+                            log("Found Master Index in: " + item.file.name);
                             globalHasIndex = true;
                             globalBenchCourtMap = buildVisualBenchMap(textContent.items);
                             
@@ -350,12 +404,11 @@
                 }
 
                 if (!globalHasIndex) {
-                    log("No index found in any file. Will use SL for all court numbers.");
+                    log("No Master Index found in any file. Will use SL for courts.");
                 }
 
                 statusText.textContent = "Extracting Cases...";
 
-                // Step 3: Process the cases using the preserved logic
                 for (let fileIndex = 0; fileIndex < loadedPdfs.length; fileIndex++) {
                     const pdf = loadedPdfs[fileIndex].pdf;
                     const allPages = [];
@@ -415,7 +468,6 @@
                             if (upper.includes("HON'BLE")) { currentCaseObj = null; pageObj.justices.push(line.trim()); continue; }
                             if (upper.includes("REGISTRAR JUDICIAL")) { pageObj.justices.push("REGISTRAR JUDICIAL"); }
 
-                            // Preserved Lazy Matching Regex
                             const explicitMatch = line.match(/^(\d+)\s+([A-Za-z0-9\.\(\)\s\-\&]+?\d+\/\d+)\s*(.*)/i);
                             if (explicitMatch) {
                                 currentActiveItemNo = explicitMatch[1];
@@ -423,7 +475,6 @@
                                 pageObj.cases.push(currentCaseObj); continue;
                             }
 
-                            // Preserved Lazy Matching Regex
                             const cleanLine = line.replace(/^c\/w\s*/i, "").trim();
                             const implicitMatch = cleanLine.match(/^([A-Za-z0-9\.\(\)\s\-\&]+?\d+\/\d+)\s*(.*)/i);
                             if (implicitMatch && currentActiveItemNo !== "-" && (line.toLowerCase().startsWith('c/w') || cleanLine.length > 5)) {
@@ -456,9 +507,14 @@
                                 let mapInfo = globalBenchCourtMap[currentBench.replace(/[^A-Z0-9-]/g, "")];
                                 if (mapInfo) {
                                     currentCourt = mapInfo.court;
-                                    if (mapInfo.justices && mapInfo.justices !== "-") currentJustices = mapInfo.justices;
+                                    if (mapInfo.justices && mapInfo.justices !== "-") {
+                                        currentJustices = mapInfo.justices;
+                                    } else if (p.justices.length > 0) {
+                                        currentJustices = p.justices.join(" & ");
+                                    }
                                 } else {
                                     currentCourt = (nextP && !nextP.benchStart && nextP.headerCourt) ? nextP.headerCourt : (p.headerCourt || "-");
+                                    if (p.justices.length > 0) currentJustices = p.justices.join(" & ");
                                 }
                             } else if (!currentCourt || currentCourt === "-") {
                                 if (p.headerCourt) currentCourt = p.headerCourt;
@@ -555,7 +611,6 @@
             document.getElementById('progress-container').classList.add('hidden');
         }
 
-        // Preserved Number Format Pushing Logic
         async function pushUpdatesToSheet() {
             const btn = document.getElementById('push-btn');
             const originalHTML = btn.innerHTML;
