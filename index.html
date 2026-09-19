@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Case Matcher</title>
+    <title>Legal Case Matcher V48 (Smart Text Scanner)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -38,7 +38,7 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i></div>
-                <h1 class="text-xl font-bold text-slate-800">Case Matcher V47</h1>
+                <h1 class="text-xl font-bold text-slate-800">Case Matcher V48</h1>
             </div>
         </div>
     </nav>
@@ -290,32 +290,31 @@
             return cleaned.replace(/\s+/g, " ").trim();
         }
 
-        // --- NEW SMART TEXT SCANNING INDEX BUILDER ---
         function buildTextScanningBenchMap(items) {
             const map = {};
-            // Concatenate all text from the page into a single stream to ignore layout shifts
             const rawText = items.map(i => i.str).join(" ").replace(/\s+/g, " ");
             
-            // Regex actively hunts for DB/SB followed by a dash/number, and then looks for 'Court No' nearby
-            const regex = /(DB|SB)\s*[-–]?\s*([IVX0-9]+).{0,30}?COURT\s*(?:NO\.?)?\s*(\d+)(.*?)(?=(DB|SB)\s*[-–]?\s*[IVX0-9]+.{0,30}?COURT|$)/gi;
-            
+            const regex = /(DB|SB)\s*[-–]?\s*([IVX0-9]+)/gi;
             let match;
+            
             while ((match = regex.exec(rawText)) !== null) {
                 const type = match[1].toUpperCase();
                 const num = match[2].toUpperCase();
-                const court = match[3];
-                const followingText = match[4];
                 
-                let justices = "-";
-                // Extracts justice names using proximity
-                const jMatch = followingText.match(/HON'BLE[^\d\*_]*/gi);
-                if(jMatch) {
-                    justices = jMatch.join(" ").replace(/\(Through Virtual Mode\)/gi, "").replace(/\s+/g, " ").trim();
-                    if(justices.endsWith("&")) justices = justices.substring(0, justices.length - 1).trim();
+                let chunk = rawText.substring(match.index, match.index + 45).toUpperCase();
+                const nextBench = chunk.substring(5).search(/DB|SB/);
+                if (nextBench !== -1) {
+                    chunk = chunk.substring(0, nextBench + 5);
+                }
+                
+                let courtNum = "-";
+                const courtMatch = chunk.match(/COURT[^\d]{1,15}(\d+)|(\d+)[^\d]{1,15}COURT/);
+                if (courtMatch) {
+                    courtNum = courtMatch[1] || courtMatch[2];
                 }
                 
                 getBenchVariants(type, num).forEach(v => { 
-                    map[v] = { court: court, justices: justices }; 
+                    map[v] = { court: courtNum, justices: "-" }; 
                 });
             }
             
@@ -362,7 +361,7 @@
                         if (rawTextNoSpace.includes("INDEX") && (rawTextNoSpace.includes("CAUSELIST") || rawTextNoSpace.includes("BENCH"))) {
                             log("Found Master Index in: " + item.file.name);
                             globalHasIndex = true;
-                            // CALLING NEW SMART SCANNER
+                            
                             globalBenchCourtMap = buildTextScanningBenchMap(textContent.items);
                             
                             const dateMatch = rawText.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})/);
