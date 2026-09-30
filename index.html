@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legal Case Matcher V52 (Expanded Scanner & Page No Exclusion)</title>
+    <title>Legal Case Matcher V53 (Nearest Neighbor Scanner)</title>
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -79,7 +79,7 @@
             <div class="flex items-center gap-3">
                 <div class="bg-blue-600 text-white p-2 rounded-lg"><i class="fa-solid fa-scale-balanced text-xl"></i>
                 </div>
-                <h1 class="text-xl font-bold text-slate-800">Case Matcher V52</h1>
+                <h1 class="text-xl font-bold text-slate-800">Case Matcher V53</h1>
             </div>
         </div>
     </nav>
@@ -199,7 +199,7 @@
         // ==========================================
         // PASTE YOUR GOOGLE APPS SCRIPT WEB APP URL HERE
         // ==========================================
-        const GOOGLE_WEB_APP_URL = "YOUR_WEB_APP_URL_HERE";
+        const GOOGLE_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwgpBj_MNgSAgHPFw-X8eoD5lD8evy9N7uXJZhlVHKOq1fL_UhlH7gUwWWP9ZSTWfyI/exec";
         // ==========================================
 
         window.onload = function () {
@@ -349,39 +349,53 @@
             return cleaned.replace(/\s+/g, " ").trim();
         }
 
+        // --- V53: NEAREST NEIGHBOR TEXT SCANNING MAP BUILDER ---
         function buildTextScanningBenchMap(items) {
             const map = {};
             const lines = reconstructLinesV5(items);
             const rawText = lines.join(" ").replace(/\s+/g, " ").toUpperCase();
 
-            const regex = /(DB|SB)\s*[-–]?\s*([IVX0-9]+)/gi;
-            let match;
+            const benchRegex = /(DB|SB)\s*[-–]?\s*([IVX0-9]+)/gi;
+            const courtRegex = /COURT[^\d]{0,15}(\d+)|(\d+)[^\d]{0,15}COURT/gi;
 
-            while ((match = regex.exec(rawText)) !== null) {
-                const type = match[1].toUpperCase();
-                const num = match[2].toUpperCase();
-
-                // V52: Expanded chunk size to 250 characters to bypass long page number streams
-                let chunk = rawText.substring(match.index, match.index + 250).toUpperCase();
-
-                const nextBench = chunk.substring(5).search(/(?:\s|^)(DB|SB)\s*[-–]?\s*[IVX0-9]+/);
-                if (nextBench !== -1) {
-                    chunk = chunk.substring(0, nextBench + 5);
-                }
-
-                let courtNum = "-";
-                const courtMatch = chunk.match(/COURT[^\d]{1,15}(\d+)|(\d+)[^\d]{1,15}COURT/);
-                if (courtMatch) {
-                    courtNum = courtMatch[1] || courtMatch[2];
-                }
-
-                getBenchVariants(type, num).forEach(v => {
-                    map[v] = { court: courtNum, justices: "-" };
+            let benches = [];
+            let bMatch;
+            while ((bMatch = benchRegex.exec(rawText)) !== null) {
+                benches.push({
+                    type: bMatch[1].toUpperCase(),
+                    num: bMatch[2].toUpperCase(),
+                    index: bMatch.index
                 });
             }
 
-            if (!map["DB-I"]) map["DB-I"] = { court: "1", justices: "-" };
-            if (!map["SB-I"]) map["SB-I"] = { court: "1", justices: "-" };
+            let courts = [];
+            let cMatch;
+            while ((cMatch = courtRegex.exec(rawText)) !== null) {
+                courts.push({
+                    court: cMatch[1] || cMatch[2],
+                    index: cMatch.index
+                });
+            }
+
+            benches.forEach(b => {
+                let closestCourt = "-";
+                let minDistance = Infinity;
+
+                courts.forEach(c => {
+                    let dist = Math.abs(b.index - c.index);
+                    // Match Courts physically closest to the Bench (within 150 characters)
+                    if (dist < minDistance && dist < 150) {
+                        minDistance = dist;
+                        closestCourt = c.court;
+                    }
+                });
+
+                getBenchVariants(b.type, b.num).forEach(v => {
+                    map[v] = { court: closestCourt, justices: "-" };
+                });
+            });
+
+            // Hardcoded fallbacks completely removed. If no court is found, it will safely output "-".
             return map;
         }
 
@@ -499,13 +513,16 @@
                             if (fallbackMatch && !headerString.includes("HIGH")) {
                                 pageObj.headerCourt = fallbackMatch[1];
                             } else {
-                                // V52: Strict Page No Exclusion
+                                // V53: Strict Page No and List No Exclusion
                                 for (let j = 0; j < headerItems.length; j++) {
                                     let text = headerItems[j].str.trim();
                                     if (/^\d{1,2}$/.test(text) && headerItems[j].transform[5] > 700) {
                                         let prevStr = j > 0 ? headerItems[j - 1].str.toUpperCase() : "";
                                         let prevPrevStr = j > 1 ? headerItems[j - 2].str.toUpperCase() : "";
-                                        if (!prevStr.includes("PAGE") && !prevStr.includes("NO") && !prevPrevStr.includes("PAGE")) {
+
+                                        if (!prevStr.includes("PAGE") && !prevStr.includes("NO") &&
+                                            !prevPrevStr.includes("PAGE") && !prevStr.includes("LIST") &&
+                                            !prevPrevStr.includes("LIST")) {
                                             pageObj.headerCourt = text;
                                             break;
                                         }
